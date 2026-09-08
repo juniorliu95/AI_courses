@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Note components · AI course notes</title>
+<meta name="description" content="Every building block available in the lecture template, rendered next to its markup.">
+<script>(function(){try{var t=localStorage.getItem('notes-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="../assets/notes.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../assets/notes.js"></script>
+<style>
+  details { max-width: var(--measure); margin: -.6em 0 2em; font-family: var(--font-sans); }
+  details summary { cursor: pointer; font-size: .78rem; color: var(--text-faint); letter-spacing: .06em; text-transform: uppercase; font-weight: 700; }
+  details[open] summary { margin-bottom: .6em; }
+  .demo { max-width: var(--measure); }
+</style>
+</head>
+<body>
+<div class="progress"><div class="progress__bar" id="progressBar"></div></div>
+
+<header class="topbar">
+  <button class="iconbtn sidebar-toggle" data-sidebar-toggle aria-label="Toggle contents">☰</button>
+  <a class="topbar__brand" href="../index.html">AI Notes<span class="dot">.</span></a>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <span class="sep">/</span><span class="current">Note components</span>
+  </nav>
+  <span class="topbar__spacer"></span>
+  <button class="iconbtn" data-theme-toggle aria-label="Toggle theme">☾</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar__label">Reference</p>
+    <a class="sidebar__course" href="components.html">Note components</a>
+    <p class="sidebar__meta">Copy any block into a lecture page.</p>
+    <p class="sidebar__label">On this page</p>
+    <nav class="toc" id="toc"></nav>
+  </aside>
+
+  <main class="content" id="content">
+    <div class="lecture-head">
+      <p class="kicker">Template reference</p>
+      <h1>Note components</h1>
+      <p class="lead">Every block the lecture template supports, rendered next to the markup that produces it.
+         Copy, paste, edit the words.</p>
+    </div>
+
+    <h2>Callouts</h2>
+    <div class="demo">
+<div class="callout callout--note">
+  <p class="callout__title">Note</p>
+  <p>Neutral aside or clarification.</p>
+</div>
+
+<div class="callout callout--tip">
+  <p class="callout__title">Intuition</p>
+  <p>Why the result is true, in plain words.</p>
+</div>
+
+<div class="callout callout--warning">
+  <p class="callout__title">Watch out</p>
+  <p>A common mistake or a condition that is easy to miss.</p>
+</div>
+
+<div class="callout callout--danger">
+  <p class="callout__title">Wrong</p>
+  <p>Something I got wrong the first time, kept as a reminder.</p>
+</div>
+
+<div class="callout callout--definition">
+  <p class="callout__title">Definition <span class="name">Convex function</span></p>
+  <p>Every chord lies above the graph.</p>
+</div>
+
+<div class="callout callout--theorem">
+  <p class="callout__title">Theorem <span class="name">Jensen's inequality</span></p>
+  <p>For convex \(f\): \(f(\mathbb{E}[X]) \le \mathbb{E}[f(X)]\).</p>
+</div>
+
+<div class="callout callout--example">
+  <p class="callout__title">Example</p>
+  <p>A worked instance of the idea.</p>
+</div>
+
+<div class="callout callout--question">
+  <p class="callout__title">Open question</p>
+  <p>Something still unclear — revisit later.</p>
+</div>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;div class=&quot;callout callout--note&quot;&gt;
+  &lt;p class=&quot;callout__title&quot;&gt;Note&lt;/p&gt;
+  &lt;p&gt;Neutral aside or clarification.&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout callout--tip&quot;&gt;
+  &lt;p class=&quot;callout__title&quot;&gt;Intuition&lt;/p&gt;
+  &lt;p&gt;Why the result is true, in plain words.&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout callout--warning&quot;&gt;
+  &lt;p class=&quot;callout__title&quot;&gt;Watch out&lt;/p&gt;
+  &lt;p&gt;A common mistake or a condition that is easy to miss.&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout callout--danger&quot;&gt;
+  &lt;p class=&quot;callout__title&quot;&gt;Wrong&lt;/p&gt;
+  &lt;p&gt;Something I got wrong the first time, kept as a reminder.&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout callout--definition&quot;&gt;
+  &lt;p class=&quot;callout__title&quot;&gt;Definition &lt;span class=&quot;name&quot;&gt;Convex function&lt;/span&gt;&lt;/p&gt;
+  &lt;p&gt;Every chord lies above the graph.&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout callout--theorem&quot;&gt;
+  &lt;p class=&quot;callout__title&quot;&gt;Theorem &lt;span class=&quot;name&quot;&gt;Jensen&#x27;s inequality&lt;/span&gt;&lt;/p&gt;
+  &lt;p&gt;For convex \(f\): \(f(\mathbb{E}[X]) \le \mathbb{E}[f(X)]\).&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout callout--example&quot;&gt;
+  &lt;p class=&quot;callout__title&quot;&gt;Example&lt;/p&gt;
+  &lt;p&gt;A worked instance of the idea.&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;div class=&quot;callout callout--question&quot;&gt;
+  &lt;p class=&quot;callout__title&quot;&gt;Open question&lt;/p&gt;
+  &lt;p&gt;Something still unclear — revisit later.&lt;/p&gt;
+&lt;/div&gt;</code></pre>
+    </details>
+
+    <h2>Summary panel</h2>
+    <div class="demo">
+<div class="panel">
+  <p class="panel__title">In one minute</p>
+  <ul>
+    <li>First takeaway.</li>
+    <li>Second takeaway.</li>
+  </ul>
+</div>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;div class=&quot;panel&quot;&gt;
+  &lt;p class=&quot;panel__title&quot;&gt;In one minute&lt;/p&gt;
+  &lt;ul&gt;
+    &lt;li&gt;First takeaway.&lt;/li&gt;
+    &lt;li&gt;Second takeaway.&lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/div&gt;</code></pre>
+    </details>
+
+    <h2>Numbered steps</h2>
+    <div class="demo">
+<ol class="steps">
+  <li><strong>Initialise</strong> the parameters to zero.</li>
+  <li><strong>Compute</strong> the gradient over the batch.</li>
+  <li><strong>Update</strong> and repeat until convergence.</li>
+</ol>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;ol class=&quot;steps&quot;&gt;
+  &lt;li&gt;&lt;strong&gt;Initialise&lt;/strong&gt; the parameters to zero.&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Compute&lt;/strong&gt; the gradient over the batch.&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Update&lt;/strong&gt; and repeat until convergence.&lt;/li&gt;
+&lt;/ol&gt;</code></pre>
+    </details>
+
+    <h2>Key terms</h2>
+    <div class="demo">
+<dl class="terms">
+  <dt>Hypothesis</dt><dd>The function the algorithm outputs.</dd>
+  <dt>Cost function</dt><dd>How badly it fits the training set.</dd>
+</dl>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;dl class=&quot;terms&quot;&gt;
+  &lt;dt&gt;Hypothesis&lt;/dt&gt;&lt;dd&gt;The function the algorithm outputs.&lt;/dd&gt;
+  &lt;dt&gt;Cost function&lt;/dt&gt;&lt;dd&gt;How badly it fits the training set.&lt;/dd&gt;
+&lt;/dl&gt;</code></pre>
+    </details>
+
+    <h2>Math</h2>
+    <div class="demo">
+<p>Inline: \(\theta^\top x\). Display:</p>
+<p>$$ \theta^\star = (X^\top X)^{-1} X^\top y $$</p>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;p&gt;Inline: \(\theta^\top x\). Display:&lt;/p&gt;
+&lt;p&gt;$$ \theta^\star = (X^\top X)^{-1} X^\top y $$&lt;/p&gt;</code></pre>
+    </details>
+
+    <h2>Code</h2>
+    <div class="demo">
+<pre><code class="language-python">def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+</code></pre>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;pre&gt;&lt;code class=&quot;language-python&quot;&gt;def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+&lt;/code&gt;&lt;/pre&gt;</code></pre>
+    </details>
+
+    <h2>Table</h2>
+    <div class="demo">
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Method</th><th>Cost</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Gradient descent</td><td>\(O(kmn)\)</td><td>Scales to large \(n\)</td></tr>
+      <tr><td>Normal equation</td><td>\(O(n^3)\)</td><td>No learning rate</td></tr>
+    </tbody>
+  </table>
+</div>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;div class=&quot;table-wrap&quot;&gt;
+  &lt;table&gt;
+    &lt;thead&gt;&lt;tr&gt;&lt;th&gt;Method&lt;/th&gt;&lt;th&gt;Cost&lt;/th&gt;&lt;th&gt;Notes&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+    &lt;tbody&gt;
+      &lt;tr&gt;&lt;td&gt;Gradient descent&lt;/td&gt;&lt;td&gt;\(O(kmn)\)&lt;/td&gt;&lt;td&gt;Scales to large \(n\)&lt;/td&gt;&lt;/tr&gt;
+      &lt;tr&gt;&lt;td&gt;Normal equation&lt;/td&gt;&lt;td&gt;\(O(n^3)\)&lt;/td&gt;&lt;td&gt;No learning rate&lt;/td&gt;&lt;/tr&gt;
+    &lt;/tbody&gt;
+  &lt;/table&gt;
+&lt;/div&gt;</code></pre>
+    </details>
+
+    <h2>Figure</h2>
+    <div class="demo">
+<figure>
+  <img src="images/gradient-descent.png" alt="Contour plot of the cost with descent path">
+  <figcaption>Fig 1 — Descent path on the cost contours. Put images in the course folder.</figcaption>
+</figure>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;figure&gt;
+  &lt;img src=&quot;images/gradient-descent.png&quot; alt=&quot;Contour plot of the cost with descent path&quot;&gt;
+  &lt;figcaption&gt;Fig 1 — Descent path on the cost contours. Put images in the course folder.&lt;/figcaption&gt;
+&lt;/figure&gt;</code></pre>
+    </details>
+
+    <h2>Quote</h2>
+    <div class="demo">
+<blockquote>
+  <p>“All models are wrong, but some are useful.” — George Box</p>
+</blockquote>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;blockquote&gt;
+  &lt;p&gt;“All models are wrong, but some are useful.” — George Box&lt;/p&gt;
+&lt;/blockquote&gt;</code></pre>
+    </details>
+
+    <h2>Chips and tags</h2>
+    <div class="demo">
+<ul class="chips">
+  <li class="chip">2026-09-08</li>
+  <li class="chip">supervised learning</li>
+  <li><a class="chip chip--accent" href="#" target="_blank" rel="noopener">Source ↗</a></li>
+</ul>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;ul class=&quot;chips&quot;&gt;
+  &lt;li class=&quot;chip&quot;&gt;2026-09-08&lt;/li&gt;
+  &lt;li class=&quot;chip&quot;&gt;supervised learning&lt;/li&gt;
+  &lt;li&gt;&lt;a class=&quot;chip chip--accent&quot; href=&quot;#&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;Source ↗&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;</code></pre>
+    </details>
+
+    <h2>Side-by-side columns</h2>
+    <div class="demo">
+<div class="cols">
+  <div class="callout callout--tip"><p class="callout__title">Pros</p><p>Simple, convex, closed form.</p></div>
+  <div class="callout callout--warning"><p class="callout__title">Cons</p><p>Sensitive to outliers.</p></div>
+</div>
+    </div>
+    <details>
+      <summary>HTML</summary>
+      <pre><code class="language-html">&lt;div class=&quot;cols&quot;&gt;
+  &lt;div class=&quot;callout callout--tip&quot;&gt;&lt;p class=&quot;callout__title&quot;&gt;Pros&lt;/p&gt;&lt;p&gt;Simple, convex, closed form.&lt;/p&gt;&lt;/div&gt;
+  &lt;div class=&quot;callout callout--warning&quot;&gt;&lt;p class=&quot;callout__title&quot;&gt;Cons&lt;/p&gt;&lt;p&gt;Sensitive to outliers.&lt;/p&gt;&lt;/div&gt;
+&lt;/div&gt;</code></pre>
+    </details>
+
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "title": "Diffusion & Large Vision Models",
+  "code": "CME 296",
+  "org": "Stanford",
+  "description": "Generative modelling for vision: DDPM, DDIM, score matching, and the large vision models built on top of them.",
+  "source": "https://online.stanford.edu/",
+  "tags": [
+    "diffusion",
+    "generative models",
+    "vision"
+  ],
+  "order": 2
+}

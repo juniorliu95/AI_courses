@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diffusion Models: DDPM and DDIM · Diffusion &amp; Large Vision Models</title>
+<meta name="description" content="Forward noising as a Gaussian Markov chain, the ELBO that makes the reverse process learnable, the DDPM noise-prediction loss, and DDIM&#x27;s deterministic sampler for 10–100× fewer steps.">
+<meta name="note:course" content="Diffusion &amp; Large Vision Models">
+<meta name="note:number" content="01">
+<meta name="note:date" content="2026-09-08">
+<meta name="note:tags" content="DDPM, DDIM, ELBO">
+<script>(function(){try{var t=localStorage.getItem('notes-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../../assets/notes.js"></script>
+</head>
+<body>
+<div class="progress"><div class="progress__bar" id="progressBar"></div></div>
+
+<header class="topbar">
+  <button class="iconbtn sidebar-toggle" data-sidebar-toggle aria-label="Toggle contents">☰</button>
+  <a class="topbar__brand" href="../../index.html">AI Notes<span class="dot">.</span></a>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <span class="sep">/</span>
+    <!-- CRUMB:START --><a href="index.html">Diffusion &amp; Large Vision Models</a><!-- CRUMB:END -->
+    <span class="sep">/</span>
+    <span class="current">Diffusion Models: DDPM and DDIM</span>
+  </nav>
+  <span class="topbar__spacer"></span>
+  <button class="iconbtn" data-theme-toggle aria-label="Toggle theme">☾</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar__label">Course</p>
+    <a class="sidebar__course" href="index.html">Diffusion &amp; Large Vision Models</a>
+    <p class="sidebar__meta">Lecture 01 · 2026-09-08</p>
+
+    <p class="sidebar__label">On this page</p>
+    <nav class="toc" id="toc" aria-label="Table of contents"></nav>
+
+    <!-- SIBLINGS:START -->
+    <hr>
+    <p class="sidebar__label">Lectures</p>
+    <nav class="toc">
+      <ul>
+        <li><a href="01-diffusion-models-ddpm-and-ddim.html" class="is-active">01 · Diffusion Models: DDPM and DDIM</a></li>
+      </ul>
+    </nav>
+  <!-- SIBLINGS:END -->
+  </aside>
+
+  <main class="content" id="content">
+    <div class="lecture-head">
+      <p class="kicker">Diffusion &amp; Large Vision Models · Lecture 01</p>
+      <h1>Diffusion Models: DDPM and DDIM</h1>
+      <p class="lead">Forward noising as a Gaussian Markov chain, the ELBO that makes the reverse process learnable, the DDPM noise-prediction loss, and DDIM&#x27;s deterministic sampler for 10–100× fewer steps.</p>
+      <ul class="chips">
+        <li class="chip">2026-09-08</li>
+        <li class="chip">DDPM, DDIM, ELBO</li>
+        <li><a class="chip chip--accent" href="https://online.stanford.edu/" target="_blank" rel="noopener">Source ↗</a></li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <p class="panel__title">In one minute</p>
+      <ul>
+        <li><strong>Convention</strong>: \(q\) is the fixed forward (noising) process we design; \(p_\theta\) is the backward (denoising) model we learn.</li>
+        <li>The forward chain is Gaussian and Markov, so any \(x_t\) can be sampled from \(x_0\) in one shot: \(q(x_t \mid x_0) = \mathcal{N}(\sqrt{\bar\alpha_t}x_0, (1-\bar\alpha_t)I)\).</li>
+        <li>\(\log p_\theta(x_0)\) is intractable, so we maximise the <strong>ELBO</strong> instead; it collapses into KL divergences between Gaussians, which reduce to distances between means.</li>
+        <li>That leaves the whole of DDPM as one line: predict the noise, \(\mathcal{L} = \mathbb{E}\big[\lVert \epsilon_\theta(x_t,t) - \epsilon \rVert^2\big]\).</li>
+        <li><strong>DDIM</strong> keeps those same marginals but drops the stochasticity, so sampling can skip steps — 10–100× faster.</li>
+      </ul>
+    </div>
+
+    <h2>Conventions: p versus q</h2>
+    <p>约定俗成，表示概率分布时候，p 是我们真正想要的，从噪声还原图像的模型 (backward)，q 是加噪声模型 (forward)。</p>
+    <p>q 是我们设计定死的，p 是需要学习的。</p>
+
+    <h2>Forward process (encoding)</h2>
+
+    <h3>One step at a time</h3>
+    <p>每一步的概率分布：</p>
+
+    <div class="figs">
+      <figure>
+        <img src="images/Screenshot_0008-07-06_at_0.34.49.png" alt="Slide: forward process adds noise step by step, q(x_t|x_{t-1}) = N(sqrt(1-beta_t) x_{t-1}, beta_t I)">
+        <figcaption>这里 q 是条件概率，是 \(x_{t-1}\) 下 \(x_t\) 的概率分布 — \(q(x_t\mid x_{t-1}) = \mathcal{N}(\sqrt{1-\beta_t}\,x_{t-1},\ \beta_t I)\), walking the clean image \(x_0\) up to pure noise \(\epsilon \approx x_T\).</figcaption>
+      </figure>
+      <figure>
+        <img src="images/Screenshot_0008-07-06_at_0.35.56.png" alt="Blackboard: x_t = sqrt(1-beta_t) x_{t-1} + sqrt(beta_t) epsilon, epsilon ~ N(0,I)">
+        <figcaption>从 \(x = \mu + \sigma\epsilon\) 得到的采样式：\(x_t = \sqrt{1-\beta_t}\,x_{t-1} + \sqrt{\beta_t}\,\epsilon\).</figcaption>
+      </figure>
+    </div>
+
+    <h3>Closing the form: any t in one shot</h3>
+    <p>全局概率分布：</p>
+
+    <figure>
+      <img src="images/Screenshot_0008-07-06_at_1.15.27.png" alt="Slide: q(x_t|x_{t-1}) collapses into q(x_t|x_0) = N(sqrt(alpha_bar_t) x_0, (1-alpha_bar_t) I)">
+      <figcaption>$$ q(x_t \mid x_0) = \mathcal{N}\!\left(\sqrt{\bar\alpha_t}\,x_0,\ (1-\bar\alpha_t)I\right), \quad \bar\alpha_t = \prod_{i=1}^{t}\alpha_i, \quad \alpha_t = 1-\beta_t $$</figcaption>
+    </figure>
+
+    <div class="callout callout--tip">
+      <p class="callout__title">Why the coefficients collapse</p>
+      <p>独立高斯之和仍是高斯。iid 变量相加，因为 iid 的方差可以相加 \(\mathrm{var}(A+B) = \mathrm{var}(A) + \mathrm{var}(B)\)，这里 \(\epsilon\) 是高斯分布，系数代表标准差，我们可以直接用 \(\mathrm{std}(A+B)\) 来替换系数。</p>
+    </div>
+
+    <figure>
+      <img src="images/Screenshot_0008-07-06_at_1.10.49.png" alt="Blackboard derivation substituting x_{t-1} into x_t and combining the two noise terms into one">
+      <figcaption>板书推导：把 \(x_{t-1}\) 代进 \(x_t\)，两个独立噪声项合并 —
+        \(\alpha_t(1-\alpha_{t-1}) + 1 - \alpha_t = 1 - \alpha_t\alpha_{t-1}\)，递推下去就得到 \(\bar\alpha_t\).</figcaption>
+    </figure>
+
+    <h2>Reverse process (decoding)</h2>
+
+    <div class="figs">
+      <figure>
+        <img src="images/Screenshot_0008-07-06_at_1.16.42.png" alt="Slide: objective is to learn p_theta, the reverse denoising step p_theta(x_{t-1}|x_t)">
+        <figcaption><strong>Objective.</strong> We want to learn \(p_\theta\), one reverse step \(p_\theta(x_{t-1}\mid x_t)\) at a time.</figcaption>
+      </figure>
+      <figure>
+        <img src="images/Screenshot_0008-07-06_at_12.18.11.png" alt="Slide: maximise log p_theta(x_0) over theta">
+        <figcaption>\(\max_\theta \log p_\theta(x_0)\) — find the parameters that make the training images most probable. The \(\log\) is for computational stability and its nice algebraic properties.</figcaption>
+      </figure>
+    </div>
+
+    <h3>Probability refresher</h3>
+    <p>conditonal p explanation:</p>
+
+    <div class="figs">
+      <figure>
+        <img src="images/Screenshot_0008-07-06_at_15.00.17.png" alt="Slide: conditional probability p(x2|x1) as a slice through a 2-D density">
+        <figcaption><strong>Conditional probability</strong> \(p(x_2\mid x_1)\) is the probability of \(x_2\) <em>knowing that</em> we have \(x_1\) — a vertical slice through the joint density.</figcaption>
+      </figure>
+      <figure>
+        <img src="images/Screenshot_0008-07-06_at_15.06.01.png" alt="Slide: marginalization p(x1) = integral p(x1,x2) dx2">
+        <figcaption>marginization — \(p(x_1) = \int p(x_1,x_2)\,dx_2\).</figcaption>
+      </figure>
+    </div>
+
+    <figure>
+      <img src="images/Screenshot_0008-07-06_at_15.06.56.png" alt="Slide: chain rule for the joint distribution and marginalization over the whole trajectory">
+      <figcaption>The two facts we actually need, stated for a whole trajectory:
+        \(p(x_1,\dots,x_T) = p(x_1)\,p(x_2\mid x_1)\cdots p(x_T\mid x_1,\dots,x_{T-1})\) and
+        \(p(x_1) = \int p(x_1,\dots,x_T)\,dx_2\cdots dx_T\).</figcaption>
+    </figure>
+
+    <h2>DDPM</h2>
+    <p>we cannot caluclate the following to get <code>x0</code>:</p>
+    <p>$$ \log p_{\theta}(x_0) = \log\int p(x_0, x_{1:T})\,dx_{1:T} $$</p>
+    <p>The integral runs over every intermediate image \(x_{1:T}\) — astronomically high-dimensional, so there is no hope of evaluating it directly.</p>
+
+    <div class="figs">
+      <figure>
+        <img src="images/Screenshot_0008-07-06_at_15.38.50.png" alt="Slide: four-step strategy — derive lower bound, expand terms, show tractable, deduce loss">
+        <figcaption><strong>Strategy.</strong> ① derive a lower bound for maximum log-likelihood estimation ② expand its terms ③ show the bound is tractable ④ deduce the final loss function.</figcaption>
+      </figure>
+      <figure>
+        <img src="images/Screenshot_0008-07-06_at_15.45.08.png" alt="Slide: ELBO — E[log p_theta(x_0)] >= E[log p_theta(x_{0:T}) / q(x_{1:T}|x_0)]">
+        <figcaption>① $$ \mathbb{E}_{x_0\sim q(x_0)}\big[\log p_\theta(x_0)\big] \;\geq\; \mathbb{E}_{x_{0:T}\sim q(x_{0:T})}\left[\log \frac{p_\theta(x_{0:T})}{q(x_{1:T}\mid x_0)}\right] $$ ELBO = <strong>E</strong>vidence <strong>L</strong>ower <strong>BO</strong>und.</figcaption>
+      </figure>
+    </div>
+
+    <details class="toggle">
+      <summary>Derivation <span class="name">ELBO</span></summary>
+      <p>when we want to calculate \(\log p_\theta(x) = \log\int p_\theta(x,z)\,dz\), it is really hard to integrate on \(z\) as \(z\) can be high dim (in the case of diffusion \(z = x_{1:T}\)).</p>
+      <p>instead, we can have:</p>
+      <p>$$ \begin{align*} \log p_\theta(x) &amp;= \log\int q(z)\frac{p_\theta(x,z)}{q(z)}dz \\ &amp;= \log \mathbb{E}_{z\sim q}\left[\frac{p_\theta(x,z)}{q(z)}\right] \end{align*} $$</p>
+      <p>because log is concave function，we have jensen's inequalty</p>
+      <p>$$ \begin{align*} \log p_\theta(x) &amp;= \log \mathbb{E}_{z\sim q}\left[\frac{p_\theta(x,z)}{q(z)}\right] \\ &amp;\geq \mathbb{E}_q\left[\log \frac{p_\theta(x,z)}{q(z)}\right] \\ &amp;= \mathbb{E}_q\left[\log p_\theta(x,z) - \log q(z)\right] := \text{ELBO} \end{align*} $$</p>
+      <p>for KL-divergence:</p>
+      <p>$$ \begin{align*} D_{KL}\big(q(z)\,\|\,p_\theta(z\mid x)\big) &amp;= \int q(z)\log\frac{q(z)}{p_\theta(z\mid x)}dz \\ &amp;= \mathbb{E}_q\left[\log\frac{q(z)}{p_\theta(z\mid x)}\right] \\ &amp;= \mathbb{E}_q\left[\log q(z) - \log p_\theta(z\mid x)\right] \\ &amp;= \mathbb{E}_q\left[\log q(z) - \log\frac{p_\theta(z,x)}{p_\theta(x)}\right] \\ &amp;= \mathbb{E}_q\left[\log q(z) - \log p_\theta(x,z) + \log p_\theta(x)\right] \end{align*} $$</p>
+      <p>then</p>
+      <p>$$ \text{ELBO} = \log p_\theta(x) - D_{KL}\big(q(z)\,\|\,p_\theta(z\mid x)\big) $$</p>
+
+      <details class="toggle">
+        <summary>Aside <span class="name">VAE</span></summary>
+        <p>because \(p_\theta(x,z) = p_\theta(x\mid z)p(z)\), we can also have:</p>
+        <p>$$ \text{ELBO} = \mathbb{E}_q\big[\log p_\theta(x\mid z)\big] - D_{KL}\big(q(z)\,\|\,p(z)\big) $$</p>
+        <p>which is the principle of VAE (first item is the decoder reconstruction, second is to align \(q(z)\) to <strong>prior \(p(z)\)</strong>) — \(p(z)\) is usually \(\mathcal{N}(0,1)\) by default.</p>
+        <figure>
+          <img src="images/Screenshot_0008-07-07_at_0.18.55.png" alt="Diagram: VAE encoder q(z|x), latent z, decoder p_theta(x|z), with the reconstruction term and the KL regulariser to the prior marked">
+          <figcaption>重建项 = \(x\) 与 \(\hat{x}\) 的距离（编码→解码往返）；正则项 = \(D_{KL}(q(z\mid x)\,\|\,p(z))\)，把隐分布拉向先验，跟解码器无关。</figcaption>
+        </figure>
+        <p>只有重建项的话，编码器会<strong>作弊</strong>：把每个训练样本塞到隐空间里某个孤零零的点、方差压到极小，等于建了张查找表 —— 重建完美，但隐空间千疮百孔，点与点之间是空的。这时你想<strong>生成</strong>新样本（从隐空间随便采个 \(z\) 再解码）就废了，因为你采到的地方模型没见过。</p>
+      </details>
+    </details>
+
+    <h3>② Expand the terms</h3>
+    <p>then</p>
+
+    <div class="figs">
+      <figure>
+        <img src="images/Screenshot_0008-07-07_at_12.48.42.png" alt="Slide: definition of KL divergence as an integral and as an expectation under p">
+        <figcaption>$$ \mathrm{KL}(P\,\|\,Q) = \int \log\!\left(\frac{p(x)}{q(x)}\right)p(x)\,dx = \mathbb{E}_{x\sim p}\left[\log\frac{p(x)}{q(x)}\right] $$</figcaption>
+      </figure>
+      <figure>
+        <img src="images/Screenshot_0008-07-07_at_12.47.07.png" alt="Slide: ELBO expanded into a sum of KL divergences between q(x_{t-1}|x_t,x_0) and p_theta(x_{t-1}|x_t)">
+        <figcaption>② $$ \text{ELBO} = -\sum_{t=2}^{T} \mathrm{KL}\big(q(x_{t-1}\mid x_t,x_0)\,\|\,p_\theta(x_{t-1}\mid x_t)\big) + \text{some other terms} $$
+          Left arrow: <em>can we compute this?</em> Right arrow: <em>this is what we want to learn.</em></figcaption>
+      </figure>
+    </div>
+
+    <p>we know:</p>
+    <p>$$ q(x_t \mid x_{1:t-1}) = q(x_t \mid x_{t-1}) \quad \text{// Markov} $$</p>
+    <p>and we have:</p>
+    <p>$$ \begin{align*} q(x_{t-1}\mid x_t, x_0) &amp;= \frac{q(x_t\mid x_{t-1}, x_0)\,q(x_{t-1}\mid x_0)}{q(x_t\mid x_0)} \quad \text{// 分母对于 } x_{t-1} \text{ 是常数} \\ &amp;\propto q(x_t\mid x_{t-1})\,q(x_{t-1}\mid x_0) \quad \text{// multi of gaussian p is still gaussian} \end{align*} $$</p>
+
+    <h3>③ Show the lower bound is tractable</h3>
+    <p>so for the two items in ELBO:</p>
+
+    <div class="figs">
+      <figure>
+        <img src="images/Screenshot_0008-07-07_at_17.54.42.png" alt="Slide 3a: q(x_{t-1}|x_t,x_0) is Gaussian with mean mu-tilde and variance beta-tilde">
+        <figcaption>③a \(q(x_{t-1}\mid x_t,x_0) = \mathcal{N}(\tilde\mu_t, \tilde\beta_t)\) with
+          \(\tilde\mu_t = \frac{1}{\sqrt{\alpha_t}}\left(x_t - \frac{1-\alpha_t}{\sqrt{1-\bar\alpha_t}}\epsilon_t\right)\).
+          Derivation: Bayes' rule via \(q(\,\cdot\mid x_0)\) + the Markov property.</figcaption>
+      </figure>
+      <figure>
+        <img src="images/Screenshot_0008-07-07_at_18.31.46.png" alt="Slide 3b: assume p_theta(x_{t-1}|x_t) is Gaussian with learned mean and covariance">
+        <figcaption>③b We <em>assume</em> \(p_\theta(x_{t-1}\mid x_t) = \mathcal{N}\big(\mu_\theta(x_t,t), \Sigma_\theta(x_t,t)\big)\).
+          Justification: if \(q(x_t\mid x_{t-1})\) is Gaussian, then \(q(x_{t-1}\mid x_t)\) is approximately Gaussian.</figcaption>
+      </figure>
+    </div>
+
+    <h3>④ Deduce the loss</h3>
+    <p>KL-divergence btw two Gaussians can be transfer to distance:</p>
+
+    <figure>
+      <img src="images/Screenshot_0008-07-07_at_23.09.40.png" alt="Slide 4: the DDPM loss, expected squared error between predicted and true noise">
+      <figcaption>注意第一项的参数就是 \(x_t\) —
+        $$ \mathcal{L}_{\text{DDPM}} = \mathbb{E}_{t,x_0,\epsilon}\left[\big\lVert \epsilon_\theta\big(\sqrt{\bar\alpha_t}x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon,\ t\big) - \epsilon \big\rVert^2\right] $$
+        with \(t\sim\mathcal{U}\{1,T\}\), \(x_0\sim q_0(x_0)\), \(\epsilon\sim\mathcal{N}(0,I)\). Derivation: compute the KL divergence between two Gaussians.</figcaption>
+    </figure>
+
+    <p>从采样式到分布式：</p>
+    <p>$$ \begin{align*} &amp;x_t = \sqrt{\bar{\alpha_t}}\,x_0 + \sqrt{1-\bar{\alpha_t}}\,\epsilon \\ &amp;q(x_t\mid x_0) \sim \mathcal{N}\left(\sqrt{\bar{\alpha_t}}\,x_0,\ \sqrt{1-\bar{\alpha_t}}\right) \quad \text{// 因为 } x_0 \text{ 是一时被固定的变量，所以加入概率条件} \end{align*} $$</p>
+
+    <h3>Training</h3>
+    <div class="figs">
+      <figure>
+        <img src="images/Screenshot_0008-07-08_at_0.21.59.png" alt="Slide: training loop — sample a clean image, noise and a timestep, build x_t, predict epsilon">
+        <figcaption>training — ① sample a clean image \(x_0\sim q_0\), noise \(\epsilon\sim\mathcal{N}(0,I)\) and a time step \(t\sim\mathcal{U}\{1,T\}\), build \(x_t = \sqrt{\bar\alpha_t}x_0 + \sqrt{1-\bar\alpha_t}\epsilon\); ② use \(x_t\) and \(t\) to predict \(\epsilon\) via \(\epsilon_\theta(x_t,t)\).</figcaption>
+      </figure>
+      <figure>
+        <img src="images/Screenshot_0008-07-08_at_0.26.34.png" alt="Slide: DDPM sampling — start from noise and iteratively update x_t to x_{t-1}">
+        <figcaption>inference. \(z\) is because \(x\) is gaussian, \(x = \mu + \sigma\epsilon\).
+          $$ x_{t-1} = \frac{1}{\sqrt{\alpha_t}}\left(x_t - \frac{1-\alpha_t}{\sqrt{1-\bar\alpha_t}}\,\epsilon_\theta(x_t,t)\right) + \sigma_t z $$</figcaption>
+      </figure>
+    </div>
+
+    <div class="callout callout--warning">
+      <p class="callout__title">Limitation</p>
+      <p>because we are computing \(T\) times, it is too slow!</p>
+    </div>
+
+    <h2>DDIM (Denoising Diffusion Implicit Models)</h2>
+    <p>remember relationship between \(x_t\) and \(x_{t-1}\) here — everything below tries to take the same trajectory in fewer steps.</p>
+
+    <div class="figs">
+      <figure>
+        <img src="images/Screenshot_0008-07-08_at_0.51.32.png" alt="Slide attempt 1: unrolling the update by induction still needs many network evaluations">
+        <figcaption><strong>Attempt 1.</strong> Derive a formula by induction:
+          \(x_{\tau_{i-1}} = Ax_{\tau_i} + \sum_{s=\tau_{i-1}+1}^{\tau_i} B_s\,\epsilon_\theta(x_s,s) + C_s z_s\).
+          <mark>Problem</mark>: still need to evaluate the network several times. No progress.</figcaption>
+      </figure>
+      <figure>
+        <img src="images/Screenshot_0008-07-08_at_0.52.48.png" alt="Slide attempt 2: skipping steps directly, with the stochastic sigma term boxed in red">
+        <figcaption>增加随机噪声，采样过程不确定，质量会很差 — <strong>Attempt 2.</strong> directly skip steps along
+          \(\tau_0 = 0 &lt; \tau_1 &lt; \dots &lt; \tau_S = T\). <mark>Problem</mark>: mix large jumps + stochasticity = bad quality.</figcaption>
+      </figure>
+    </div>
+
+    <div class="figs">
+      <figure>
+        <img src="images/Screenshot_0008-07-08_at_0.54.08.png" alt="Slide: key property — the loss only relies on the marginals q(x_t|x_0)">
+        <figcaption><strong>Key property.</strong> The loss function only relies on the marginals \(q(x_t\mid x_0)\).
+          So: find a \(q\) whose marginal matches DDPM's and whose generation can be made deterministic.</figcaption>
+      </figure>
+      <figure>
+        <img src="images/Screenshot_0008-07-08_at_1.01.05.png" alt="Slide: the q_sigma family, its marginal matches DDPM and sigma=0 makes p_theta deterministic">
+        <figcaption>上面用归纳法：假设当前成立，往下推一步，发现成立；下面看 \(\sigma = 0\) 时候方差为 0，所以完全 deterministic，可以不存在随机性。
+          $$ q_\sigma(x_{t-1}\mid x_t,x_0) = \mathcal{N}\!\left(\sqrt{\bar\alpha_{t-1}}\,x_0 + \sqrt{1-\bar\alpha_{t-1}-\sigma_t^2}\,\frac{x_t - \sqrt{\bar\alpha_t}\,x_0}{\sqrt{1-\bar\alpha_t}},\ \sigma_t^2 I\right) $$</figcaption>
+      </figure>
+    </div>
+
+    <div class="figs">
+      <figure>
+        <img src="images/Screenshot_0008-07-08_at_1.55.58.png" alt="Slide: DDIM with sigma_t = 0, x_{t-1} built from the predicted clean image plus re-noising, no stochastic term">
+        <figcaption>\(\hat{x_0}\) 就是之前的式子，带入 \(q_\sigma\) 的采样式就能得到下面 — with \(\sigma_t = 0\):
+          $$ x_{t-1} = \sqrt{\bar\alpha_{t-1}}\,\hat{x}_0 + \sqrt{1-\bar\alpha_{t-1}}\,\epsilon_\theta(x_t,t) + \varnothing,
+             \qquad \hat{x}_0 = \frac{x_t - \sqrt{1-\bar\alpha_t}\,\epsilon_\theta(x_t,t)}{\sqrt{\bar\alpha_t}} $$
+          "our prediction of the clean image from time \(t\)" + "…that we noise to time \(t-1\)" … with no stochasticity.</figcaption>
+      </figure>
+      <figure>
+        <img src="images/Screenshot_0008-07-08_at_1.56.43.png" alt="Slide: accelerated update rule jumping along a sub-sequence tau_i of timesteps">
+        <figcaption><strong>Update rule: accelerated.</strong>
+          \(x_{\tau_{i-1}} = \sqrt{\bar\alpha_{\tau_{i-1}}}\,\hat{x}_0(\tau_i) + \sqrt{1-\bar\alpha_{\tau_{i-1}}}\,\epsilon_\theta(x_{\tau_i},\tau_i)\),
+          along \(\tau_0 = 0 &lt; \tau_1 &lt; \dots &lt; \tau_S = T\) with \(S \ll T\); the speedup is \(T/S\).</figcaption>
+      </figure>
+    </div>
+
+    <figure>
+      <img src="images/Screenshot_0008-07-08_at_1.57.17.png" alt="Slide: speedup versus FID degradation table for CIFAR-10">
+      <figcaption>Speedup is typically 10×–100×, traded against quality.</figcaption>
+    </figure>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Speed-up</th><th>1×</th><th>10×</th><th>20×</th><th>50×</th><th>100×</th></tr></thead>
+        <tbody>
+          <tr><td>FID impact</td><td>baseline</td><td>+3%</td><td>+16%</td><td>+70%</td><td>+330%</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><strong>Discussion.</strong> Skipping steps <em>with</em> inter-step stochasticity → much worse quality; the schedule for \(\{\tau_i\}\) is a hyperparameter.</p>
+
+    <h2>Score matching</h2>
+    <div class="callout callout--example">
+      <p class="callout__title">To do</p>
+      <p>Section left empty in the original note — fill in from the lecture recording.</p>
+    </div>
+
+    <h2>Key terms</h2>
+    <dl class="terms">
+      <dt>\(q\) / forward process</dt><dd>The fixed Gaussian Markov chain that adds noise. Nothing is learned here.</dd>
+      <dt>\(p_\theta\) / reverse process</dt><dd>The learned denoiser that walks noise back to an image.</dd>
+      <dt>\(\beta_t,\ \alpha_t = 1-\beta_t,\ \bar\alpha_t = \prod_i \alpha_i\)</dt><dd>Noise schedule; \(\bar\alpha_t\) is what lets you jump from \(x_0\) to any \(x_t\) in one step.</dd>
+      <dt>ELBO</dt><dd>Evidence Lower BOund — the tractable surrogate for \(\log p_\theta(x_0)\); equals \(\log p_\theta(x) - D_{KL}(q\,\|\,p_\theta)\).</dd>
+      <dt>Noise prediction \(\epsilon_\theta(x_t,t)\)</dt><dd>What the network actually outputs; the DDPM loss is squared error against the true \(\epsilon\).</dd>
+      <dt>DDIM</dt><dd>A non-Markovian family \(q_\sigma\) with the same marginals; \(\sigma = 0\) makes sampling deterministic and skippable.</dd>
+      <dt>FID</dt><dd>Fréchet Inception Distance — the sample-quality metric used to price the speedup.</dd>
+    </dl>
+
+    <h2>Questions &amp; follow-ups</h2>
+    <div class="callout callout--question">
+      <p class="callout__title">Open question</p>
+      <p>DDPM assumes \(p_\theta\) is Gaussian because \(q(x_{t-1}\mid x_t)\) is <em>approximately</em> Gaussian when \(\beta_t\) is small. How badly does that approximation break with an aggressive noise schedule?</p>
+    </div>
+    <div class="callout callout--question">
+      <p class="callout__title">Open question</p>
+      <p>The FID table shows quality collapsing past 50×. Is that the sampler or the schedule \(\{\tau_i\}\)? Check what schedule the DDIM paper used.</p>
+    </div>
+
+    <!-- PAGER:START -->
+    <nav class="pager">
+      <a class="prev empty"><span class="dir">Start of course</span><span class="ttl">—</span></a>
+      <a class="next empty"><span class="dir">End of course</span><span class="ttl">—</span></a>
+    </nav>
+    <!-- PAGER:END -->
+  </main>
+</div>
+</body>
+</html>
