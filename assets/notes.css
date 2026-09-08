@@ -530,3 +530,58 @@ tbody tr:hover { background: var(--bg-subtle); }
 .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-params { color: var(--hl-attr); }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 700; }
+
+/* ---------- Image lightbox (click a figure to open, drag to pan, wheel to zoom) ---------- */
+.content img.is-zoomable, .page img.is-zoomable { cursor: zoom-in; }
+
+.lightbox {
+  position: fixed; inset: 0; z-index: 100;
+  display: none;
+  background: color-mix(in srgb, var(--bg) 78%, #000 22%);
+  backdrop-filter: blur(6px) saturate(120%);
+  touch-action: none;
+}
+.lightbox.is-open { display: block; }
+
+.lightbox__stage { position: absolute; inset: 0; overflow: hidden; cursor: grab; }
+.lightbox__stage.is-panning { cursor: grabbing; }
+
+.lightbox__img {
+  position: absolute; top: 0; left: 0;
+  transform-origin: 0 0;
+  max-width: none; /* overrides the global img rule — we want true pixels */
+  user-select: none; -webkit-user-drag: none;
+  background: #fff;
+  box-shadow: 0 12px 48px rgba(0,0,0,.45);
+  border-radius: 2px;
+}
+
+.lightbox__bar {
+  position: absolute; top: 0; right: 0; left: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 70%, transparent), transparent);
+}
+.lightbox__bar .iconbtn { background: var(--bg-elevated); }
+.lightbox__zoom {
+  font: 600 .76rem/1 var(--font-mono); color: var(--text-muted);
+  min-width: 4.2em; text-align: center; font-variant-numeric: tabular-nums;
+}
+.lightbox__title {
+  flex: 1; min-width: 0;
+  font: .8rem/1.4 var(--font-sans); color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lightbox__hint {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  padding: 6px 12px; border-radius: 999px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  font: .74rem/1 var(--font-sans); color: var(--text-faint);
+  pointer-events: none; opacity: 1; transition: opacity .4s ease;
+}
+.lightbox__hint.is-faded { opacity: 0; }
+
+@media (max-width: 640px) {
+  .lightbox__title { display: none; }
+}
+@media print { .lightbox { display: none !important; } }
