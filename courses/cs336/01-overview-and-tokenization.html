@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview and Tokenization · Language Modeling from Scratch</title>
+<meta name="description" content="Why build LMs from scratch, the LM landscape from n-grams to open-weight frontier models, the five course units, and tokenization: character, byte, word, and byte-pair encoding.">
+<meta name="note:course" content="Language Modeling from Scratch">
+<meta name="note:number" content="01">
+<meta name="note:date" content="2026-09-19">
+<meta name="note:tags" content="overview, tokenization, BPE">
+<script>(function(){try{var t=localStorage.getItem('notes-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../../assets/notes.js"></script>
+</head>
+<body>
+<div class="progress"><div class="progress__bar" id="progressBar"></div></div>
+
+<header class="topbar">
+  <button class="iconbtn sidebar-toggle" data-sidebar-toggle aria-label="Toggle contents">☰</button>
+  <a class="topbar__brand" href="../../index.html">AI Notes<span class="dot">.</span></a>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <span class="sep">/</span>
+    <!-- CRUMB:START --><a href="index.html">Language Modeling from Scratch</a><!-- CRUMB:END -->
+    <span class="sep">/</span>
+    <span class="current">Overview and Tokenization</span>
+  </nav>
+  <span class="topbar__spacer"></span>
+  <button class="iconbtn" data-theme-toggle aria-label="Toggle theme">☾</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar__label">Course</p>
+    <a class="sidebar__course" href="index.html">Language Modeling from Scratch</a>
+    <p class="sidebar__meta">Lecture 01 · 2026-09-19</p>
+
+    <p class="sidebar__label">On this page</p>
+    <nav class="toc" id="toc" aria-label="Table of contents"></nav>
+
+    <!-- SIBLINGS:START -->
+    <hr>
+    <p class="sidebar__label">Lectures</p>
+    <nav class="toc">
+      <ul>
+        <li><a href="01-overview-and-tokenization.html" class="is-active">01 · Overview and Tokenization</a></li>
+        <li><a href="02-resource-accounting.html">02 · Resource Accounting</a></li>
+      </ul>
+    </nav>
+  <!-- SIBLINGS:END -->
+  </aside>
+
+  <main class="content" id="content">
+    <div class="lecture-head">
+      <p class="kicker">Language Modeling from Scratch · Lecture 01</p>
+      <h1>Overview and Tokenization</h1>
+      <p class="lead">Why build LMs from scratch, the LM landscape from n-grams to open-weight frontier models, the five course units, and tokenization: character, byte, word, and byte-pair encoding.</p>
+      <ul class="chips">
+        <li class="chip">2026-09-19</li>
+        <li class="chip">overview, tokenization, BPE</li>
+        <li><a class="chip chip--accent" href="https://cs336.stanford.edu/lectures?trace=lecture_01&amp;source=lecture_01.py&amp;line=1" target="_blank" rel="noopener">Source ↗</a></li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <p class="panel__title">In one minute</p>
+      <ul>
+        <li>Researchers are becoming <strong>disconnected</strong> from the technology (train → fine-tune → prompt). The course's answer: <strong>understanding via building</strong>.</li>
+        <li>Frontier models are out of reach, and small models aren't always representative — but <strong>mechanics</strong> and <strong>mindset</strong> transfer; <strong>intuitions</strong> only partially.</li>
+        <li>The bitter lesson, read correctly: algorithms that scale are what matter. \(\text{accuracy} = \text{efficiency} \times \text{resources}\) — so <strong>maximize efficiency</strong>.</li>
+        <li>Five units, five assignments: basics, systems, scaling laws, data, alignment.</li>
+        <li>Tokenization: character, byte and word tokenizers are each bad in a different way; <strong>BPE</strong> learns a vocabulary from data by repeatedly merging the most frequent adjacent pair.</li>
+      </ul>
+    </div>
+
+    <h2>Welcome</h2>
+    <p><strong>CS336: Language Models From Scratch (Spring 2026)</strong> — the 3rd offering of CS336. Lectures from the 2nd offering (Spring 2025) are on <a href="https://www.youtube.com/playlist?list=PLoROMvodv4rOY23Y0BoGoBGgQ1zmU_MT_" target="_blank" rel="noopener">YouTube</a>.</p>
+
+    <figure>
+      <img src="images/l01/course-staff.png" width="600" alt="Photos of the CS336 Spring 2026 course staff">
+      <figcaption>Course staff, Spring 2026.</figcaption>
+    </figure>
+
+    <p>What's new?</p>
+    <ul>
+      <li>Same "from scratch" philosophy</li>
+      <li>Prioritize high value-per-time concepts, don't lose the forest for the trees</li>
+      <li>More coverage of modern LM ingredients (mixture of experts, long-context, agents)</li>
+    </ul>
+
+    <h2>Why did we make this course?</h2>
+    <p>Problem: researchers are becoming <strong>disconnected</strong> from the underlying technology.</p>
+    <ul>
+      <li>2016: researchers implemented and trained their own models.</li>
+      <li>2018: researchers downloaded models (e.g., BERT) and fine-tuned them.</li>
+      <li>Today: researchers prompt API models (e.g., GPT/Claude/Gemini).</li>
+    </ul>
+    <p>Moving up levels of abstraction boosts productivity, but</p>
+    <ul>
+      <li>These abstractions are leaky (in contrast to programming languages or operating systems).</li>
+      <li>There is still fundamental research to be done that requires tearing up the stack.</li>
+    </ul>
+
+    <div class="callout callout--tip">
+      <p class="callout__title">Philosophy of this course</p>
+      <p><strong>Full understanding</strong> of this technology is necessary for <strong>fundamental research</strong> — so: <strong>understanding via building</strong>.</p>
+      <p>But there's one small problem…</p>
+    </div>
+
+    <h3>The industrialization of language models</h3>
+
+    <figure>
+      <img src="images/l01/industrialisation.jpg" width="400" alt="Industrial refinery with smokestacks at sunset">
+    </figure>
+
+    <p>Frontier models are really expensive:</p>
+    <ul>
+      <li>2023: GPT-4 supposedly cost $100M to train. <a href="https://www.wired.com/story/openai-ceo-sam-altman-the-age-of-giant-ai-models-is-already-over/" target="_blank" rel="noopener">[article]</a></li>
+      <li>2025: xAI builds cluster with 230K GPUs for training Grok. <a href="https://x.com/elonmusk/status/1947701807389515912" target="_blank" rel="noopener">[article]</a></li>
+    </ul>
+
+    <p>There are no public details on how frontier models are built. From the GPT-4 technical report <a href="https://arxiv.org/pdf/2303.08774.pdf" target="_blank" rel="noopener" title="GPT-4 Technical Report">[OpenAI+ 2023]</a>:</p>
+
+    <figure>
+      <img src="images/l01/gpt4-no-details.png" width="600" alt="Excerpt from the GPT-4 technical report declining to share architecture, hardware, compute, dataset or training details">
+      <figcaption>"…this report contains no further details about the architecture (including model size), hardware, training compute, dataset construction, training method, or similar."</figcaption>
+    </figure>
+
+    <p>Frontier models are out of reach for us. We could build small language models (&lt;1B parameters), but this might not be representative of large language models.</p>
+
+    <div class="figs">
+      <figure>
+        <img src="images/l01/roller-flops.png" alt="Plot: share of FLOPs spent in attention versus MLP as model size grows">
+        <figcaption><strong>Example 1:</strong> fraction of FLOPs spent in attention versus MLP changes with scale. <a href="https://x.com/stephenroller/status/1579993017234382849" target="_blank" rel="noopener">[post]</a></figcaption>
+      </figure>
+      <figure>
+        <img src="images/l01/wei-emergence-plot.png" alt="Plots: task accuracy stays near random then jumps sharply beyond a certain training-FLOPs scale">
+        <figcaption><strong>Example 2:</strong> emergence of behavior with scale. <a href="https://arxiv.org/pdf/2206.07682" target="_blank" rel="noopener" title="Emergent Abilities of Large Language Models">[Wei+ 2022]</a></figcaption>
+      </figure>
+    </div>
+
+    <h3>What can we learn in this class that transfers to frontier models?</h3>
+    <p>There are three types of knowledge:</p>
+    <dl class="terms">
+      <dt>Mechanics</dt><dd>How things work (what a Transformer is, how model parallelism works).</dd>
+      <dt>Mindset</dt><dd>Squeezing the most out of the hardware, taking scaling seriously.</dd>
+      <dt>Intuitions</dt><dd>Which data and modeling decisions yield good accuracy.</dd>
+    </dl>
+    <p>We can teach mechanics and mindset (these do transfer). We can only partially teach intuitions (do not necessarily transfer across scales).</p>
+
+    <h3>Intuitions? 🤷</h3>
+    <p>Some design decisions are simply not (yet) justifiable and just come from experimentation. Example: Noam Shazeer paper that introduced SwiGLU <a href="https://arxiv.org/pdf/2002.05202.pdf" target="_blank" rel="noopener" title="GLU Variants Improve Transformer">[Shazeer 2020]</a>.</p>
+
+    <figure>
+      <img src="images/l01/divine-benevolence.png" width="600" alt="Conclusion paragraph of the GLU Variants paper attributing the success of the architectures to divine benevolence">
+      <figcaption>"We offer no explanation as to why these architectures seem to work; we attribute their success, as all else, to divine benevolence."</figcaption>
+    </figure>
+
+    <h3>The bitter lesson</h3>
+    <ul>
+      <li>Wrong interpretation: scale is all that matters, algorithms don't matter.</li>
+      <li>Right interpretation: algorithms that scale are what matter.</li>
+    </ul>
+
+    <div class="callout callout--theorem">
+      <p class="callout__title">accuracy = efficiency × resources</p>
+      <p>In fact, efficiency is way more important at larger scales (can't afford to be wasteful). <a href="https://arxiv.org/abs/2005.04305" target="_blank" rel="noopener" title="Measuring the Algorithmic Efficiency of Neural Networks">[Hernandez+ 2020]</a> showed 44× algorithmic efficiency on ImageNet between 2012 and 2019.</p>
+    </div>
+
+    <p>Framing: what is the best model one can build given a certain compute and data budget? In other words, <strong>maximize efficiency</strong>!</p>
+
+    <h2>The language model landscape</h2>
+
+    <h3>Pre-neural (before 2010s)</h3>
+    <ul>
+      <li>Language model to measure the entropy of English <a href="https://www.princeton.edu/~wbialek/rome/refs/shannon_51.pdf" target="_blank" rel="noopener" title="Prediction and Entropy of Printed English">[Shannon 1950]</a></li>
+      <li>N-gram language models (used in machine translation and speech recognition systems) <a href="https://aclanthology.org/D07-1090.pdf" target="_blank" rel="noopener" title="Language Models in Machine Translation">[Brants+ 2007]</a></li>
+    </ul>
+
+    <h3>Neural ingredients (2010s)</h3>
+    <ul>
+      <li>Long-Short Term Memory (LSTM) <a href="https://www.bioinf.jku.at/publications/older/2604.pdf" target="_blank" rel="noopener" title="Long Short-Term Memory">[Hochreiter+ 1997]</a></li>
+      <li>First neural language model <a href="https://www.jmlr.org/papers/volume3/bengio03a/bengio03a.pdf" target="_blank" rel="noopener" title="A Neural Probabilistic Language Model">[Bengio+ 2003]</a></li>
+      <li>Sequence-to-sequence modeling (for machine translation) <a href="https://arxiv.org/pdf/1409.3215.pdf" target="_blank" rel="noopener" title="Sequence to Sequence Learning with Neural Networks">[Sutskever+ 2014]</a></li>
+      <li>Adam optimizer <a href="https://arxiv.org/pdf/1412.6980.pdf" target="_blank" rel="noopener" title="Adam: A Method for Stochastic Optimization">[Kingma+ 2014]</a></li>
+      <li>Attention mechanism (for machine translation) <a href="https://arxiv.org/pdf/1409.0473.pdf" target="_blank" rel="noopener" title="Neural Machine Translation by Jointly Learning to Align and Translate">[Bahdanau+ 2014]</a></li>
+      <li>Transformer architecture (for machine translation) <a href="https://arxiv.org/pdf/1706.03762.pdf" target="_blank" rel="noopener" title="Attention Is All You Need">[Vaswani+ 2017]</a></li>
+      <li>Mixture of experts <a href="https://arxiv.org/pdf/1701.06538.pdf" target="_blank" rel="noopener" title="Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer">[Shazeer+ 2017]</a></li>
+      <li>Model parallelism <a href="https://arxiv.org/pdf/1811.06965.pdf" target="_blank" rel="noopener" title="GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism">[Huang+ 2018]</a> <a href="https://arxiv.org/abs/1910.02054" target="_blank" rel="noopener" title="ZeRO: Memory Optimizations Toward Training Trillion Parameter Models">[Rajbhandari+ 2019]</a> <a href="https://arxiv.org/pdf/1909.08053.pdf" target="_blank" rel="noopener" title="Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism">[Shoeybi+ 2019]</a></li>
+    </ul>
+
+    <h3>Early foundation models (late 2010s)</h3>
+    <ul>
+      <li>ELMo: pretraining with LSTMs, fine-tuning improves downstream tasks <a href="https://arxiv.org/abs/1802.05365" target="_blank" rel="noopener" title="Deep contextualized word representations">[Peters+ 2018]</a></li>
+      <li>BERT: pretraining with Transformer, fine-tuning improves downstream tasks <a href="https://arxiv.org/abs/1810.04805" target="_blank" rel="noopener" title="BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding">[Devlin+ 2018]</a></li>
+      <li>Google's T5 (11B): cast everything as text-to-text <a href="https://arxiv.org/pdf/1910.10683.pdf" target="_blank" rel="noopener" title="Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer">[Raffel+ 2019]</a></li>
+    </ul>
+
+    <h3>Embracing scaling</h3>
+    <ul>
+      <li>OpenAI's GPT-2 (1.5B): fluent text, first signs of zero-shot <a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf" target="_blank" rel="noopener" title="Language Models are Unsupervised Multitask Learners">[Radford+ 2019]</a></li>
+      <li>Scaling laws: provide hope / predictability for scaling <a href="https://arxiv.org/pdf/2001.08361.pdf" target="_blank" rel="noopener" title="Scaling Laws for Neural Language Models">[Kaplan+ 2020]</a></li>
+      <li>OpenAI's GPT-3 (175B): in-context learning <a href="https://arxiv.org/pdf/2005.14165.pdf" target="_blank" rel="noopener" title="Language Models are Few-Shot Learners">[Brown+ 2020]</a></li>
+      <li>Google's PaLM (540B): massive scale, undertrained <a href="https://arxiv.org/pdf/2204.02311.pdf" target="_blank" rel="noopener" title="PaLM: Scaling Language Modeling with Pathways">[Chowdhery+ 2022]</a></li>
+      <li>DeepMind's Chinchilla (70B): compute-optimal scaling laws <a href="https://arxiv.org/pdf/2203.15556.pdf" target="_blank" rel="noopener" title="Training Compute-Optimal Large Language Models">[Hoffmann+ 2022]</a></li>
+    </ul>
+
+    <h3>Open models</h3>
+    <p>Early attempts (attempts to replicate GPT-3):</p>
+    <ul>
+      <li>EleutherAI's open datasets (The Pile) and models (GPT-J) <a href="https://arxiv.org/pdf/2101.00027.pdf" target="_blank" rel="noopener" title="The Pile: An 800GB Dataset of Diverse Text for Language Modeling">[Gao+ 2020]</a> <a href="https://arankomatsuzaki.wordpress.com/2021/06/04/gpt-j/" target="_blank" rel="noopener" title="GPT-J">[Wang+ 2021]</a></li>
+      <li>Meta's OPT (175B): GPT-3 replication, lots of hardware issues <a href="https://arxiv.org/pdf/2205.01068.pdf" target="_blank" rel="noopener" title="OPT: Open Pre-trained Transformer Language Models">[Zhang+ 2022]</a></li>
+      <li>Hugging Face / BigScience's BLOOM (176B): focused on data sourcing <a href="https://arxiv.org/abs/2211.05100" target="_blank" rel="noopener" title="BLOOM: A 176B-Parameter Open-Access Multilingual Language Model">[Workshop+ 2022]</a></li>
+    </ul>
+
+    <p>Credible <strong>open-weight</strong> models (weights + paper):</p>
+    <ul>
+      <li>Meta's Llama models <a href="https://arxiv.org/pdf/2302.13971.pdf" target="_blank" rel="noopener" title="LLaMA: Open and Efficient Foundation Language Models">[Touvron+ 2023]</a> <a href="https://arxiv.org/pdf/2307.09288.pdf" target="_blank" rel="noopener" title="Llama 2: Open Foundation and Fine-Tuned Chat Models">[Touvron+ 2023]</a> <a href="https://arxiv.org/abs/2407.21783" target="_blank" rel="noopener" title="The Llama 3 Herd of Models">[Grattafiori+ 2024]</a></li>
+      <li>Mistral's models <a href="https://arxiv.org/pdf/2310.06825.pdf" target="_blank" rel="noopener" title="Mistral 7B">[Jiang+ 2023]</a> <a href="https://arxiv.org/pdf/2401.04088.pdf" target="_blank" rel="noopener" title="Mixtral of Experts">[Jiang+ 2024]</a></li>
+      <li>DeepSeek's models <a href="https://arxiv.org/pdf/2401.02954.pdf" target="_blank" rel="noopener" title="DeepSeek LLM: Scaling Open-Source Language Models with Longtermism">[DeepSeek-AI+ 2024]</a> <a href="https://arxiv.org/abs/2405.04434" target="_blank" rel="noopener" title="DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model">[DeepSeek-AI+ 2024]</a> <a href="https://arxiv.org/pdf/2412.19437.pdf" target="_blank" rel="noopener" title="DeepSeek-V3 Technical Report">[DeepSeek-AI+ 2024]</a> <a href="https://arxiv.org/pdf/2501.12948.pdf" target="_blank" rel="noopener" title="DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning">[DeepSeek-AI+ 2025]</a> <a href="https://arxiv.org/abs/2512.02556" target="_blank" rel="noopener" title="DeepSeek-V3.2: Pushing the Frontier of Open Large Language Models">[DeepSeek-AI+ 2025]</a></li>
+      <li>Alibaba's Qwen models <a href="https://arxiv.org/abs/2412.15115" target="_blank" rel="noopener" title="Qwen2.5 Technical Report">[Qwen+ 2024]</a> <a href="https://arxiv.org/abs/2505.09388" target="_blank" rel="noopener" title="Qwen3 Technical Report">[Yang+ 2025]</a></li>
+      <li>Moonshot's Kimi models <a href="https://arxiv.org/pdf/2501.12599.pdf" target="_blank" rel="noopener" title="Kimi k1.5: Scaling Reinforcement Learning with LLMs">[Kimi Team 2025]</a> <a href="https://arxiv.org/abs/2602.02276" target="_blank" rel="noopener" title="Kimi K2.5: Visual Agentic Intelligence">[Kimi Team 2026]</a></li>
+      <li>Z.ai's GLM models <a href="https://arxiv.org/abs/2508.06471" target="_blank" rel="noopener" title="GLM-4.5: Agentic, Reasoning, and Coding (ARC) Foundation Models">[GLM-4.5 Team 2025]</a> <a href="https://arxiv.org/abs/2602.15763" target="_blank" rel="noopener" title="GLM-5: from Vibe Coding to Agentic Engineering">[GLM-5-Team 2026]</a></li>
+      <li>Minimax's models <a href="https://www.minimax.io/news/minimax-m25" target="_blank" rel="noopener">[MiniMax M2.5]</a></li>
+      <li>Xiaomi's MIMO models <a href="https://mimo.xiaomi.com/mimo-v2-pro" target="_blank" rel="noopener">[Xiaomi MIMO v2]</a></li>
+    </ul>
+    <p>These models are approaching closed models (GPT, Claude, Gemini, etc.).</p>
+
+    <p><strong>Open-source</strong> models (weights + paper + code + data):</p>
+    <ul>
+      <li>AI2's Olmo models <a href="https://arxiv.org/pdf/2402.00838.pdf" target="_blank" rel="noopener" title="OLMo: Accelerating the Science of Language Models">[Groeneveld+ 2024]</a> <a href="https://arxiv.org/abs/2501.00656" target="_blank" rel="noopener" title="2 OLMo 2 Furious">[Team OLMo 2024]</a> <a href="https://arxiv.org/abs/2512.13961" target="_blank" rel="noopener" title="Olmo 3">[Team Olmo 2025]</a></li>
+      <li>NVIDIA's Nemotron models <a href="https://arxiv.org/pdf/2402.16819.pdf" target="_blank" rel="noopener" title="Nemotron-4 15B Technical Report">[Parmar+ 2024]</a> <a href="https://arxiv.org/abs/2512.20856" target="_blank" rel="noopener" title="NVIDIA Nemotron 3: Efficient and Open Intelligence">[NVIDIA+ 2025]</a></li>
+      <li>Marin's models (open development) <a href="https://marin.readthedocs.io/en/latest/reports/marin-8b-retro/" target="_blank" rel="noopener">[Marin 8B retro]</a> <a href="https://marin.readthedocs.io/en/latest/reports/marin-32b-retro/" target="_blank" rel="noopener">[Marin 32B retro]</a></li>
+    </ul>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Category</th><th>Weights</th><th>Paper</th><th>Code + data</th><th>Examples</th></tr></thead>
+        <tbody>
+          <tr><td>Closed</td><td>—</td><td>—</td><td>—</td><td>GPT, Claude, Gemini</td></tr>
+          <tr><td>Open-weight</td><td>✓</td><td>✓</td><td>—</td><td>Llama, DeepSeek, Qwen, Kimi, GLM</td></tr>
+          <tr><td>Open-source</td><td>✓</td><td>✓</td><td>✓</td><td>Olmo, Nemotron, Marin</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Openness is important for trust and innovation <a href="https://arxiv.org/abs/2403.07918" target="_blank" rel="noopener" title="On the Societal Impact of Open Foundation Models">[Kapoor+ 2024]</a>. Ideas from open models enable us to teach CS336.</p>
+
+    <h3>What is a language model?</h3>
+    <ul>
+      <li>2018 (BERT): something you fine-tune</li>
+      <li>2020 (GPT-3): something you prompt</li>
+      <li>2022 (ChatGPT): something you talk to <a href="https://huggingface.co/datasets/HuggingFaceTB/smoltalk/viewer/all/train?row=72&amp;conversation-viewer=72" target="_blank" rel="noopener">[example conversation]</a></li>
+      <li>2026 (agents): something that acts autonomously <a href="https://huggingface.co/datasets/nebius/SWE-rebench-openhands-trajectories/viewer/default/train?conversation-viewer=1" target="_blank" rel="noopener">[example trace]</a></li>
+    </ul>
+    <p>The fundamentals are the same (attention, kernels, optimization). The specs are different (longer context, inference efficiency matters even more).</p>
+
+    <h2>Executable lectures</h2>
+    <p>This is an <em>executable lecture</em>, a program whose execution delivers the content of a lecture. Executable lectures make it possible to:</p>
+    <ul>
+      <li>view and run code (since everything is code!),</li>
+      <li>see the hierarchical structure of the lecture.</li>
+    </ul>
+
+    <pre><code class="language-python">total = 0  # @inspect total
+for x in [1, 2, 3]:  # @inspect x
+    total += x  # @inspect total
+# trace: x = 1, 2, 3  →  total = 1, 3, 6
+</code></pre>
+
+    <h2>Course logistics</h2>
+    <p>All information online: <a href="https://stanford-cs336.github.io/spring2026/" target="_blank" rel="noopener">course website</a>.</p>
+    <p>This is a 5-unit class. Comment from Spring 2024 course evaluation:</p>
+    <blockquote><p><em>The entire assignment was approximately the same amount of work as all 5 assignments from CS 224n plus the final project. And that's just the first homework assignment.</em></p></blockquote>
+
+    <div class="cols">
+      <div class="callout callout--tip">
+        <p class="callout__title">Why you should take this course</p>
+        <ul>
+          <li>You have an obsessive need to understand how things work.</li>
+          <li>You want to build up your research engineering muscles.</li>
+        </ul>
+      </div>
+      <div class="callout callout--warning">
+        <p class="callout__title">Why you should not take this course</p>
+        <ul>
+          <li>You actually want to get research done this quarter. (Talk to your advisor.)</li>
+          <li>You are interested in learning about the hottest new techniques in AI (e.g., multimodality, RAG, etc.). (You should take a seminar class for that.)</li>
+          <li>You want to get good results on your own application domain. (You should just prompt or fine-tune an existing model.)</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>How you can follow along at home</h3>
+    <ul>
+      <li>All lecture materials and assignments will be posted online, so feel free to follow on your own.</li>
+      <li>Lectures are recorded via <a href="https://cgoe.stanford.edu/" target="_blank" rel="noopener">CGOE</a>.</li>
+    </ul>
+
+    <h3>Assignments</h3>
+    <ul>
+      <li>5 assignments (basics, systems, scaling laws, data, alignment).</li>
+      <li>No scaffolding code, but we provide unit tests and adapter interfaces to help you check correctness.</li>
+      <li>Implement locally to test for correctness, then run on cluster for benchmarking (accuracy and speed).</li>
+      <li>Leaderboard for some assignments (minimize perplexity given training budget).</li>
+    </ul>
+
+    <h3>AI policy</h3>
+    <ul>
+      <li>Coding agents can solve all the assignments, but you won't learn anything.</li>
+      <li>AI can be tremendously useful for answering questions and tutoring.</li>
+      <li>You must use our provided AGENTS.md file, which asks the AI to be pedagogically-minded.</li>
+      <li>Please read our <a href="https://docs.google.com/document/d/1SZAlExB1qAc9izHt54gwunNpjKE6wXb8Y7yA_e-baK8/edit?tab=t.0" target="_blank" rel="noopener">AI policy guide</a>.</li>
+    </ul>
+
+    <h3>Compute</h3>
+    <ul>
+      <li>Thanks to <a href="https://modal.com/" target="_blank" rel="noopener">Modal</a> for providing compute. 🙏</li>
+      <li>Please read the <a href="https://docs.google.com/document/d/1cHE0iKVyXLJ3XpIs2XuXTmZ-HMmPk2hIPeCvy-AydMg/edit?tab=t.otis27tacaef" target="_blank" rel="noopener">guide</a> on how to access and use the compute.</li>
+    </ul>
+
+    <h2>Syllabus</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Unit</th><th>Topics</th><th>Assignment</th></tr></thead>
+        <tbody>
+          <tr><td>1 · Basics</td><td>tokenization, model architecture, training</td><td><a href="https://github.com/stanford-cs336/assignment1-basics" target="_blank" rel="noopener">A1</a></td></tr>
+          <tr><td>2 · Systems</td><td>kernels, parallelism, inference</td><td><a href="https://github.com/stanford-cs336/assignment2-systems" target="_blank" rel="noopener">A2</a></td></tr>
+          <tr><td>3 · Scaling laws</td><td>scaling laws</td><td><a href="https://github.com/stanford-cs336/assignment3-scaling" target="_blank" rel="noopener">A3</a></td></tr>
+          <tr><td>4 · Data</td><td>evaluation, curation, transformation, filtering, deduplication, mixing</td><td><a href="https://github.com/stanford-cs336/assignment4-data" target="_blank" rel="noopener">A4</a></td></tr>
+          <tr><td>5 · Alignment</td><td>RLHF, RL algorithms, RL systems</td><td><a href="https://github.com/stanford-cs336/assignment5-alignment" target="_blank" rel="noopener">A5</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Unit 1 · Basics</h3>
+    <p>Goal: be able to train a basic language model. Components: tokenization, model architecture, training.</p>
+
+    <h4>Tokenization</h4>
+    <p>What are the atoms that the model operates on? Formally: a tokenizer converts between raw inputs (bytes) and sequences of integers (tokens).</p>
+
+    <figure>
+      <img src="images/l01/tokenized-example.png" width="600" alt="Example sentence split into coloured tokens with their integer ids">
+    </figure>
+
+    <p>Popular tokenizer: <strong>Byte-Pair Encoding</strong> (BPE) <a href="https://arxiv.org/abs/1508.07909" target="_blank" rel="noopener" title="Neural Machine Translation of Rare Words with Subword Units">[Sennrich+ 2015]</a>. Intuition: break input into frequently-occuring chunks.</p>
+    <p>Efficiency lens:</p>
+    <ul>
+      <li>Reduce context length (1000 bytes → ~250 tokens)</li>
+      <li>Adaptive computation (more modeling capacity on interesting parts of input)</li>
+    </ul>
+    <p>The dream: tokenizer-free model architectures, which operate directly on bytes <a href="https://arxiv.org/abs/2105.13626" target="_blank" rel="noopener" title="ByT5: Towards a token-free future with pre-trained byte-to-byte models">[Xue+ 2021]</a> <a href="https://arxiv.org/pdf/2305.07185.pdf" target="_blank" rel="noopener" title="MEGABYTE: Predicting Million-byte Sequences with Multiscale Transformers">[Yu+ 2023]</a> <a href="https://arxiv.org/abs/2412.09871" target="_blank" rel="noopener" title="Byte Latent Transformer: Patches Scale Better Than Tokens">[Pagnoni+ 2024]</a> <a href="https://arxiv.org/abs/2406.19223" target="_blank" rel="noopener" title="T-FREE: Subword Tokenizer-Free Generative LLMs via Sparse Representations for Memory-Efficient Embeddings">[Deiseroth+ 2024]</a> <a href="https://arxiv.org/abs/2507.07955" target="_blank" rel="noopener" title="Dynamic Chunking for End-to-End Hierarchical Sequence Modeling">[Hwang+ 2025]</a>. These are promising, but have not yet been scaled up to the frontier.</p>
+
+    <h4>Model architecture</h4>
+    <p>Starting point: original Transformer <a href="https://arxiv.org/pdf/1706.03762.pdf" target="_blank" rel="noopener" title="Attention Is All You Need">[Vaswani+ 2017]</a>.</p>
+
+    <figure>
+      <img src="images/l01/transformer-architecture.png" width="500" alt="Original Transformer encoder-decoder architecture diagram">
+    </figure>
+
+    <p>Refinements:</p>
+    <ul>
+      <li>Activation functions: ReLU, SwiGLU <a href="https://arxiv.org/pdf/2002.05202.pdf" target="_blank" rel="noopener" title="GLU Variants Improve Transformer">[Shazeer 2020]</a></li>
+      <li>Positional encodings: sinusoidal, RoPE <a href="https://arxiv.org/pdf/2104.09864.pdf" target="_blank" rel="noopener" title="RoFormer: Enhanced Transformer with Rotary Position Embedding">[Su+ 2021]</a></li>
+      <li>Normalization: LayerNorm, RMSNorm, QK norm, pre-norm versus post-norm <a href="https://arxiv.org/pdf/1607.06450.pdf" target="_blank" rel="noopener" title="Layer Normalization">[Ba+ 2016]</a> <a href="https://arxiv.org/abs/1910.07467" target="_blank" rel="noopener" title="Root Mean Square Layer Normalization">[Zhang+ 2019]</a> <a href="https://arxiv.org/abs/2302.05442" target="_blank" rel="noopener" title="Scaling Vision Transformers to 22 Billion Parameters">[Dehghani+ 2023]</a> <a href="https://arxiv.org/pdf/2002.04745.pdf" target="_blank" rel="noopener" title="On Layer Normalization in the Transformer Architecture">[Xiong+ 2020]</a></li>
+      <li>Attention: full, sparse/local attention, group-query attention (GQA), multi-head latent attention (MLA) <a href="https://arxiv.org/pdf/1904.10509.pdf" target="_blank" rel="noopener" title="Generating Long Sequences with Sparse Transformers">[Child+ 2019]</a> <a href="https://arxiv.org/pdf/2305.13245.pdf" target="_blank" rel="noopener" title="GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints">[Ainslie+ 2023]</a> <a href="https://arxiv.org/abs/2405.04434" target="_blank" rel="noopener" title="DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model">[DeepSeek-AI+ 2024]</a></li>
+      <li>Recurrence/state-space models/linear attention: Mamba, Gated DeltaNet <a href="https://arxiv.org/abs/2006.16236" target="_blank" rel="noopener" title="Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention">[Katharopoulos+ 2020]</a> <a href="https://arxiv.org/abs/2405.21060" target="_blank" rel="noopener" title="Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality">[Dao+ 2024]</a> <a href="https://arxiv.org/abs/2412.06464" target="_blank" rel="noopener" title="Gated Delta Networks: Improving Mamba2 with Delta Rule">[Yang+ 2024]</a> <a href="https://arxiv.org/abs/2603.15569" target="_blank" rel="noopener" title="Mamba-3: Improved Sequence Modeling using State Space Principles">[Lahoti+ 2026]</a></li>
+      <li>MLP: dense, mixture of experts <a href="https://arxiv.org/pdf/1701.06538.pdf" target="_blank" rel="noopener" title="Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer">[Shazeer+ 2017]</a> <a href="https://arxiv.org/abs/2101.03961" target="_blank" rel="noopener" title="Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity">[Fedus+ 2021]</a></li>
+      <li>Shape (hidden dimension, depth, number of heads, number of experts)</li>
+    </ul>
+
+    <h4>Training</h4>
+    <p>How do you set the parameters of the model?</p>
+    <ul>
+      <li>Loss function (e.g., multi-token prediction) <a href="https://arxiv.org/abs/2404.19737" target="_blank" rel="noopener" title="Better &amp; Faster Large Language Models via Multi-token Prediction">[Gloeckle+ 2024]</a> <a href="https://arxiv.org/pdf/2412.19437.pdf" target="_blank" rel="noopener" title="DeepSeek-V3 Technical Report">[DeepSeek-AI+ 2024]</a></li>
+      <li>Optimizer (e.g., AdamW, SOAP, Muon) <a href="https://arxiv.org/pdf/1412.6980.pdf" target="_blank" rel="noopener" title="Adam: A Method for Stochastic Optimization">[Kingma+ 2014]</a> <a href="https://arxiv.org/pdf/1711.05101.pdf" target="_blank" rel="noopener" title="Decoupled Weight Decay Regularization">[Loshchilov+ 2017]</a> <a href="https://arxiv.org/abs/2409.11321" target="_blank" rel="noopener" title="SOAP: Improving and Stabilizing Shampoo using Adam">[Vyas+ 2024]</a> <a href="https://kellerjordan.github.io/posts/muon/" target="_blank" rel="noopener" title="Muon: An optimizer for hidden layers in neural networks">[Keller 2024]</a></li>
+      <li>Initialization scale (e.g., Xavier init, muP) <a href="https://proceedings.mlr.press/v9/glorot10a/glorot10a.pdf" target="_blank" rel="noopener" title="Understanding the difficulty of training deep feedforward neural networks">[Glorot+ 2010]</a> <a href="https://arxiv.org/abs/2203.03466" target="_blank" rel="noopener" title="Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer">[Yang+ 2022]</a></li>
+      <li>Learning rate schedule (e.g., cosine, WSD) <a href="https://arxiv.org/pdf/1608.03983.pdf" target="_blank" rel="noopener" title="SGDR: Stochastic Gradient Descent with Warm Restarts">[Loshchilov+ 2016]</a> <a href="https://arxiv.org/pdf/2404.06395.pdf" target="_blank" rel="noopener" title="MiniCPM: Unveiling the Potential of Small Language Models with Scalable Training Strategies">[Hu+ 2024]</a></li>
+      <li>Regularization (e.g., dropout, weight decay)</li>
+      <li>Batch size (e.g., critical batch size) <a href="https://arxiv.org/pdf/1812.06162.pdf" target="_blank" rel="noopener" title="An Empirical Model of Large-Batch Training">[McCandlish+ 2018]</a></li>
+      <li>MoE specific: load balancing (e.g., aux-free) <a href="https://arxiv.org/abs/2408.15664" target="_blank" rel="noopener" title="Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts">[Wang+ 2024]</a> <a href="https://arxiv.org/pdf/2412.19437.pdf" target="_blank" rel="noopener" title="DeepSeek-V3 Technical Report">[DeepSeek-AI+ 2024]</a></li>
+    </ul>
+
+    <div class="callout callout--example">
+      <p class="callout__title">Assignment 1 (basics) — <a href="https://github.com/stanford-cs336/assignment1-basics" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/stanford-cs336/assignment1-basics/blob/main/cs336_spring2026_assignment1_basics.pdf" target="_blank" rel="noopener">PDF</a></p>
+      <ul>
+        <li>Implement BPE tokenizer</li>
+        <li>Implement Transformer, cross-entropy loss, AdamW optimizer, training loop</li>
+        <li>Do resource accounting</li>
+        <li>Train on TinyStories and OpenWebText</li>
+        <li>Leaderboard: minimize OpenWebText perplexity given 45 minutes on a B200 <a href="https://github.com/stanford-cs336/spring2025-assignment1-basics-leaderboard" target="_blank" rel="noopener">[last year's leaderboard]</a></li>
+      </ul>
+    </div>
+
+    <div class="callout callout--tip">
+      <p class="callout__title">High-level principle</p>
+      <p>Everything is about balancing the following:</p>
+      <ul>
+        <li><strong>Expressivity</strong> (can represent complex dependencies in the data)</li>
+        <li><strong>Stability</strong> (keep parameter and gradient norms in goldilocks zone)</li>
+        <li><strong>Efficiency</strong> (runs fast on hardware, both training and inference)</li>
+      </ul>
+    </div>
+
+    <h3>Unit 2 · Systems</h3>
+    <p>Goal: squeeze the most out of the hardware (GPU or TPU). Components: kernels, parallelism, inference.</p>
+
+    <h4>Basics</h4>
+    <ul>
+      <li>Resource accounting: memory and compute characteristics of a model — e.g. training 70B parameters on 1T tokens: \(6 \times 70\text{e}9 \times 1\text{e}12 = 4.2\text{e}23\) FLOPs</li>
+      <li>Model parameters must be moved from memory (HBM) to the compute (SMs)</li>
+      <li>Example: B200 can perform 2.25 PFLOP/sec (bf16) with 8TB/sec memory bandwidth</li>
+      <li>Roofline analysis: understand whether we're compute-bound or memory-bound</li>
+      <li>Benchmarking and profiling (nsight): see what happens in practice</li>
+    </ul>
+
+    <div class="figs">
+      <figure>
+        <img src="images/l01/compute-memory.png" alt="Diagram: GPU compute units (SMs) fed by data moved from HBM memory">
+        <figcaption>Data has to travel from memory (HBM) to compute (SMs).</figcaption>
+      </figure>
+      <figure>
+        <img src="images/l01/dgx-b200-topology.png" alt="NVIDIA DGX B200 system topology: eight B200 GPUs linked by NVLink switches, CPUs and network cards">
+        <figcaption><a href="https://docs.nvidia.com/dgx/dgxb200-user-guide/introduction-to-dgxb200.html" target="_blank" rel="noopener">DGX B200</a> system topology.</figcaption>
+      </figure>
+    </div>
+
+    <h4>Kernels</h4>
+    <ul>
+      <li>Kernel is a function that runs on GPU</li>
+      <li>When using PyTorch, each primitive operation launches a standard kernel</li>
+      <li>Can write custom kernels to make GPUs go brrr</li>
+      <li>Principle: organize computation to minimize data movement</li>
+      <li>Strategies: operator fusion (matmul + activation), tiling (FlashAttention)</li>
+      <li>Warp divergence, memory coalescing, bank conflicts, occupancy, bulk-async memory transfers</li>
+      <li>Write kernels in CUDA/<strong>Triton</strong>/CUTLASS/ThunderKittens</li>
+    </ul>
+
+    <div class="cols">
+      <div class="callout callout--danger">
+        <p class="callout__title">Naive</p>
+        <p>read HBM; compute A; write HBM; read HBM; compute B; write HBM</p>
+      </div>
+      <div class="callout callout--tip">
+        <p class="callout__title">Fused</p>
+        <p>read HBM; compute A and B; write HBM</p>
+      </div>
+    </div>
+
+    <h4>Parallelism</h4>
+    <ul>
+      <li>What if we have 1024 GPUs?</li>
+      <li>Data movement between GPUs is even slower, but same "minimize data movement" principle holds</li>
+      <li>Use classic collective operations (e.g., gather, reduce, all-reduce)</li>
+      <li>Shard memory (parameters, activations, gradients, optimizer states) across GPUs</li>
+      <li>How to split computation: {data, tensor, pipeline, sequence, expert} parallelism</li>
+    </ul>
+
+    <h4>Inference</h4>
+    <p>Goal: generate tokens given a prompt (needed to actually use models!). Inference is also needed for reinforcement learning, test-time compute, evaluation.</p>
+    <p>Two phases: prefill and decode.</p>
+
+    <figure>
+      <img src="images/l01/prefill-decode.png" width="500" alt="Diagram: prefill processes all prompt tokens at once, decode generates one token at a time">
+    </figure>
+
+    <ul>
+      <li><strong>Prefill</strong> (similar to training): tokens are given, can process all at once (compute-bound)</li>
+      <li><strong>Decode</strong>: need to generate one token at a time (memory-bound)</li>
+    </ul>
+    <p>Methods to speed up decoding:</p>
+    <ul>
+      <li>Use cheaper model (via model pruning, quantization, distillation)</li>
+      <li>Speculative decoding: use a cheaper "draft" model to generate multiple tokens, then use the full model to score in parallel (exact decoding!)</li>
+      <li>Systems optimizations: fused kernels, continuous batching</li>
+    </ul>
+
+    <div class="callout callout--example">
+      <p class="callout__title">Assignment 2 (systems) — <a href="https://github.com/stanford-cs336/assignment2-systems" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/stanford-cs336/assignment2-systems/blob/spring2025/cs336_spring2025_assignment2_systems.pdf" target="_blank" rel="noopener">PDF from Spring 2025</a></p>
+      <ul>
+        <li>Implement a fused RMSNorm kernel in Triton</li>
+        <li>Implement distributed data parallel training</li>
+        <li>Implement optimizer state sharding</li>
+        <li>Benchmark and profile the implementations</li>
+      </ul>
+    </div>
+
+    <p>Recommended book: <a href="https://jax-ml.github.io/scaling-book/" target="_blank" rel="noopener">How to Scale Your Model</a> — nicely lays out how to approach systems for LLMs conceptually. From Google, so it foregrounds TPUs, but high-level concepts are similar.</p>
+
+    <h3>Unit 3 · Scaling laws</h3>
+    <p>Setting: if you had 1e25 FLOPs of compute, what hyperparameters would you use to train a good model? Too expensive to do hyperparameter tuning at full scale!</p>
+
+    <div class="callout callout--definition">
+      <p class="callout__title">Definition <span class="name">Scaling recipe</span></p>
+      <p>Key conceptual shift: instead of a single scale, think of a <strong>scaling recipe</strong> (FLOPs → hyperparameters). For a scaling recipe:</p>
+      <ul>
+        <li>Run experiments to compute the loss at various smaller scales (e.g., up to 1e24 FLOPs)</li>
+        <li>Fit a scaling law to predict the loss of the scaling recipe at the target scale (e.g., 1e25 FLOPs)</li>
+      </ul>
+    </div>
+
+    <p>Now you can:</p>
+    <ol>
+      <li>Optimize the scaling recipe targeting a larger scale using smaller scale experiments</li>
+      <li>Predict the loss at the target scale before actually running the experiment!</li>
+    </ol>
+    <p>Scaling laws don't happen automatically, they require careful construction of a scaling recipe. Parameterize the model in a way to get <strong>hyperparameter transfer</strong> <a href="https://arxiv.org/abs/2203.03466" target="_blank" rel="noopener" title="Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer">[Yang+ 2022]</a>. Predictability is at least as important as optimality!</p>
+
+    <p>Question: given a FLOPs budget \(C = 6ND\), use a bigger model (\(N\)) or train on more tokens (\(D\))? Classic compute-optimal scaling laws <a href="https://arxiv.org/pdf/2001.08361.pdf" target="_blank" rel="noopener" title="Scaling Laws for Neural Language Models">[Kaplan+ 2020]</a> <a href="https://arxiv.org/pdf/2203.15556.pdf" target="_blank" rel="noopener" title="Training Compute-Optimal Large Language Models">[Hoffmann+ 2022]</a>:</p>
+    <ul>
+      <li>ISOFLOP curves: for multiple small FLOPs budgets, find optimal \(N\)</li>
+      <li>Then fit a scaling law to extrapolate to large FLOPs budgets</li>
+    </ul>
+
+    <figure>
+      <img src="images/l01/chinchilla-isoflop.png" alt="Chinchilla IsoFLOP curves: loss versus parameters for several FLOP budgets, with the fitted optimal parameters and tokens versus FLOPs">
+      <figcaption>Chinchilla IsoFLOP analysis <a href="https://arxiv.org/pdf/2203.15556.pdf" target="_blank" rel="noopener">[Hoffmann+ 2022]</a>.</figcaption>
+    </figure>
+
+    <div class="callout callout--theorem">
+      <p class="callout__title">TL;DR</p>
+      <p>$$ D \approx 20N $$ is roughly optimal (e.g., 70B parameter model should be trained on ~1.4T tokens).</p>
+      <p><strong>Caveat:</strong> this doesn't take into account inference costs (want a smaller model).</p>
+    </div>
+
+    <p>Live example from Marin <a href="https://x.com/percyliang/status/2034367256277533100" target="_blank" rel="noopener">[post]</a>:</p>
+
+    <figure>
+      <img src="images/l01/marin-scaling.jpg" width="600" alt="Marin scaling-law plot with a preregistered loss prediction for an upcoming large training run">
+      <figcaption>Should be done training this week, should see how well we match the preregistered loss!</figcaption>
+    </figure>
+
+    <div class="callout callout--example">
+      <p class="callout__title">Assignment 3 (scaling laws) — <a href="https://github.com/stanford-cs336/assignment3-scaling" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/stanford-cs336/assignment3-scaling/blob/master/cs336_spring2025_assignment3_scaling.pdf" target="_blank" rel="noopener">PDF from Spring 2025</a></p>
+      <ul>
+        <li>We define a training API (hyperparameters → loss) based on previous runs</li>
+        <li>Submit "training jobs" (under a FLOPs budget) and gather data points</li>
+        <li>Fit scaling laws to the data points</li>
+        <li>Submit extrapolated hyperparameters and loss predictions</li>
+        <li>Leaderboard: minimize loss given FLOPs budget</li>
+      </ul>
+    </div>
+
+    <h3>Unit 4 · Data</h3>
+    <p>Question: What capabilities do we want the model to have? Multilingual? Good at conversation? Agentic coding capabilities?</p>
+
+    <h4>Evaluation</h4>
+    <p>What is the purpose of evaluation?</p>
+    <ol>
+      <li>Internal: guide model development (smoothness across scales, relative performance matters)</li>
+      <li>External: measure absolute quality of a real use case (ecological validity matters)</li>
+    </ol>
+    <p>Examples of evaluations:</p>
+    <ol>
+      <li>Perplexity: ideally run on private documents not on Internet (avoid contamination)</li>
+      <li>Advanced use cases: GPQA, HLE, SWE-Bench, Terminal-Bench</li>
+    </ol>
+    <p>LMs are general purpose, require a diverse set of evaluations!</p>
+
+    <h4>Data curation</h4>
+    <ul>
+      <li>Data does not just fall from the sky.</li>
+      <li>Sources: webpages crawled from the Internet, books, arXiv papers, GitHub code, etc.</li>
+      <li>Appeal to fair use to train on copyright data? <a href="https://arxiv.org/pdf/2303.15715.pdf" target="_blank" rel="noopener" title="Foundation Models and Fair Use">[Henderson+ 2023]</a></li>
+      <li>Might have to license data (e.g., Google with Reddit data) <a href="https://www.reuters.com/technology/reddit-ai-content-licensing-deal-with-google-sources-say-2024-02-22/" target="_blank" rel="noopener">[article]</a></li>
+      <li>Raw data is HTML, PDF, directories (not text), requires processing</li>
+    </ul>
+
+    <figure>
+      <img src="images/l01/pile-chart.png" width="600" alt="Treemap of The Pile's composition by source: Pile-CC, PubMed Central, Books3, arXiv, GitHub, and others">
+      <figcaption>Composition of The Pile by source <a href="https://arxiv.org/pdf/2101.00027.pdf" target="_blank" rel="noopener">[Gao+ 2020]</a>.</figcaption>
+    </figure>
+
+    <h4>Data processing</h4>
+    <ul>
+      <li>Transformation: convert HTML/PDF to text (extract main content)</li>
+      <li>Filtering: keep high quality data, remove harmful content (via classifiers)</li>
+      <li>Deduplication: save compute, avoid memorization; use Bloom filters or MinHash</li>
+      <li>Data mixing: how much to upweight/downweight each source? <a href="https://arxiv.org/abs/2407.01492" target="_blank" rel="noopener" title="RegMix: Data Mixture as Regression for Language Model Pre-training">[Liu+ 2024]</a> <a href="https://arxiv.org/abs/2602.12237" target="_blank" rel="noopener" title="Olmix: A Framework for Data Mixing Throughout LM Development">[Chen+ 2026]</a></li>
+      <li>Rewriting / synthetic data: use LM to augment real data, more similar to downstream tasks <a href="https://arxiv.org/abs/2401.16380" target="_blank" rel="noopener" title="Rephrasing the Web: A Recipe for Compute and Data-Efficient Language Modeling">[Maini+ 2024]</a></li>
+    </ul>
+
+    <p>Types of data:</p>
+    <dl class="terms">
+      <dt>Pretraining data</dt><dd>Large and diverse.</dd>
+      <dt>Mid-training data</dt><dd>High quality, including long-context.</dd>
+      <dt>Post-training data</dt><dd>Supervised fine-tuning (conversations, agentic traces with tool calling).</dd>
+    </dl>
+
+    <div class="callout callout--example">
+      <p class="callout__title">Assignment 4 (data) — <a href="https://github.com/stanford-cs336/assignment4-data" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/stanford-cs336/assignment4-data/blob/spring2025/cs336_spring2025_assignment4_data.pdf" target="_blank" rel="noopener">PDF from Spring 2025</a></p>
+      <ul>
+        <li>Convert Common Crawl HTML to text</li>
+        <li>Train classifiers to filter for quality and harmful content</li>
+        <li>Deduplication using MinHash</li>
+        <li>Leaderboard: minimize perplexity given token budget</li>
+      </ul>
+    </div>
+
+    <h3>Unit 5 · Alignment</h3>
+    <p>So far, we have trained a model on full supervision (predict the next token). Now that the model should be reasonable, we can improve it further from <strong>weak supervision</strong>. Why weak supervision? When it is easier to critique than to generate.</p>
+
+    <p>Basic template:</p>
+    <ol class="steps">
+      <li>Generate responses from the model.</li>
+      <li>Score responses with a {human, verifier, LM judge}.</li>
+      <li>Update the model to prefer better responses.</li>
+    </ol>
+
+    <p>Algorithms:</p>
+    <ul>
+      <li>Proximal Policy Optimization (PPO) from reinforcement learning <a href="https://arxiv.org/pdf/1707.06347.pdf" target="_blank" rel="noopener" title="Proximal Policy Optimization Algorithms">[Schulman+ 2017]</a> <a href="https://arxiv.org/pdf/2203.02155.pdf" target="_blank" rel="noopener" title="Training language models to follow instructions with human feedback">[Ouyang+ 2022]</a></li>
+      <li>Direct Policy Optimization (DPO): for preference data, simpler <a href="https://arxiv.org/pdf/2305.18290.pdf" target="_blank" rel="noopener" title="Direct Preference Optimization: Your Language Model is Secretly a Reward Model">[Rafailov+ 2023]</a></li>
+      <li>Group Relative Preference Optimization (GRPO): remove value function <a href="https://arxiv.org/pdf/2402.03300.pdf" target="_blank" rel="noopener" title="DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models">[Shao+ 2024]</a></li>
+    </ul>
+
+    <div class="callout callout--warning">
+      <p class="callout__title">Challenges</p>
+      <ul>
+        <li>RL algorithms are unstable and hard to tune</li>
+        <li>At scale, this requires a lot of new infrastructure (inference with async rollouts)</li>
+        <li>Constantly trading off systems efficiency and on-policyness</li>
+      </ul>
+    </div>
+
+    <div class="callout callout--example">
+      <p class="callout__title">Assignment 5 (alignment) — <a href="https://github.com/stanford-cs336/assignment5-alignment" target="_blank" rel="noopener">GitHub</a> · <a href="https://github.com/stanford-cs336/assignment5-alignment/blob/spring2025/cs336_spring2025_assignment5_alignment.pdf" target="_blank" rel="noopener">PDF from Spring 2025</a></p>
+      <ul>
+        <li>Implement Direct Preference Optimization (DPO)</li>
+        <li>Implement Group Relative Preference Optimization (GRPO)</li>
+      </ul>
+    </div>
+
+    <h3>It's all about efficiency</h3>
+    <ul>
+      <li>Resources: data + hardware (compute, memory, communication bandwidth)</li>
+      <li>How do you train the best model given a fixed set of resources?</li>
+    </ul>
+    <p>Today, we are compute-constrained, so design decisions will reflect squeezing the most out of given hardware.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Area</th><th>How it's about efficiency</th></tr></thead>
+        <tbody>
+          <tr><td>Systems</td><td>clearly about efficiency</td></tr>
+          <tr><td>Tokenization</td><td>working with raw bytes is elegant, but compute-inefficient with today's model architectures</td></tr>
+          <tr><td>Model architecture</td><td>many changes motivated by reducing memory or FLOPs (e.g., sharing KV caches, sliding window attention)</td></tr>
+          <tr><td>Data filtering</td><td>avoid wasting precious compute updating on bad / irrelevant data</td></tr>
+          <tr><td>Scaling laws</td><td>use less compute on smaller models to do hyperparameter tuning</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Tomorrow, we will become data-constrained…</p>
+
+    <h2>Tokenization</h2>
+    <p>This unit was inspired by Andrej Karpathy's video on tokenization; check it out! <a href="https://www.youtube.com/watch?v=zduSFxRajkE" target="_blank" rel="noopener">[video]</a></p>
+
+    <h3>Intro</h3>
+    <p>Raw text is generally represented as Unicode strings: <code>"Hello, 🌍! 你好!"</code>.</p>
+    <p>A language model places a probability distribution over sequences of tokens (usually represented by integer indices): <code>[15496, 11, 995, 0]</code>.</p>
+    <p>So we need a procedure that <em>encodes</em> strings into tokens. We also need a procedure that <em>decodes</em> tokens back into strings. A <code>Tokenizer</code> is a class that implements the encode and decode methods.</p>
+
+    <pre><code class="language-python">class Tokenizer(ABC):
+    """Abstract interface for a tokenizer."""
+    def encode(self, string: str) -&gt; list[int]:
+        raise NotImplementedError
+
+    def decode(self, indices: list[int]) -&gt; str:
+        raise NotImplementedError
+</code></pre>
+
+    <h3>Tokenization examples</h3>
+    <p>To get a feel for how tokenizers work, play with this <a href="https://tiktokenizer.vercel.app/?encoder=gpt2" target="_blank" rel="noopener">interactive site</a>.</p>
+
+    <div class="callout callout--note">
+      <p class="callout__title">Observations</p>
+      <ul>
+        <li>A word and its preceding space are part of the same token (e.g., <code>" world"</code>).</li>
+        <li>A word at the beginning and in the middle are represented differently (e.g., <code>"hello hello"</code>).</li>
+        <li>Numbers are tokenized into every few digits.</li>
+      </ul>
+    </div>
+
+    <p>Here's the GPT-5 tokenizer from OpenAI (<a href="https://github.com/openai/tiktoken" target="_blank" rel="noopener">tiktoken</a>) in action. Check that <code>encode()</code> and <code>decode()</code> roundtrip:</p>
+
+    <pre><code class="language-python">tokenizer = tiktoken.get_encoding("o200k_base")
+string = "Hello, 🌍! 你好!"
+indices = tokenizer.encode(string)               # [13225, 11, 130321, 235, 0, 220, 177519, 0]
+reconstructed_string = tokenizer.decode(indices)  # "Hello, 🌍! 你好!"
+assert string == reconstructed_string
+</code></pre>
+
+    <div class="callout callout--definition">
+      <p class="callout__title">Definition <span class="name">Compression ratio</span></p>
+      <p>Number of bytes per token:</p>
+      <p>$$ \text{compression ratio} = \frac{\#\text{UTF-8 bytes}}{\#\text{tokens}} $$</p>
+      <p>Here: 20 bytes / 8 tokens = <strong>2.5</strong>.</p>
+    </div>
+
+    <pre><code class="language-python">def get_compression_ratio(string: str, indices: list[int]) -&gt; float:
+    """Given `string` that has been tokenized into `indices`, return the number of UTF-8 bytes per token.."""
+    num_bytes = len(bytes(string, encoding="utf-8"))
+    num_tokens = len(indices)
+    return num_bytes / num_tokens
+</code></pre>
+
+    <p>The larger the compression ratio, the shorter the sequence (good since attention is quadratic in sequence length). One could increase compression ratio by increasing <strong>vocabulary size</strong> (number of possible token values increases), leading to sparsity. GPT-5's vocabulary size: <strong>200,019</strong>. Let's take a look at the actual <a href="https://github.com/stanford-cs336/lectures/blob/main/var/gpt5_tokenizer_vocab.txt" target="_blank" rel="noopener">vocab</a>.</p>
+
+    <h3>Character tokenizer</h3>
+    <p>A Unicode string is a sequence of Unicode characters. Each character can be converted into a code point (integer) via <code>ord</code>. It can be converted back via <code>chr</code>.</p>
+
+    <pre><code class="language-python">assert ord("a") == 97
+assert ord("🌍") == 127757
+assert chr(97) == "a"
+assert chr(127757) == "🌍"
+
+class CharacterTokenizer(Tokenizer):
+    """Represent a string as a sequence of Unicode code points."""
+    def encode(self, string: str) -&gt; list[int]:
+        return list(map(ord, string))
+
+    def decode(self, indices: list[int]) -&gt; str:
+        return "".join(map(chr, indices))
+
+# "Hello, 🌍! 你好!" → [72, 101, 108, 108, 111, 44, 32, 127757, 33, 32, 20320, 22909, 33]
+</code></pre>
+
+    <p>There are approximately 150K Unicode characters. <a href="https://en.wikipedia.org/wiki/List_of_Unicode_characters" target="_blank" rel="noopener">[Wikipedia]</a> Vocabulary size here is at least <code>max(indices) + 1</code> = 127,758 (a lower bound).</p>
+    <ul>
+      <li>Problem 1: this is a very large vocabulary.</li>
+      <li>Problem 2: many characters are quite rare (e.g., 🌍), which is inefficient use of the vocabulary.</li>
+    </ul>
+    <p>Compression ratio: 20 bytes / 13 tokens ≈ 1.54. This tokenizer is the worst of both worlds (large vocabulary, low compression ratio).</p>
+
+    <h3>Byte tokenizer</h3>
+    <p>Unicode strings can be represented as a sequence of bytes, which can be represented by integers between 0 and 255. The most common Unicode encoding is <a href="https://en.wikipedia.org/wiki/UTF-8" target="_blank" rel="noopener">UTF-8</a>. Some Unicode characters are represented by one byte, others take multiple bytes:</p>
+
+    <pre><code class="language-python">assert bytes("a", encoding="utf-8") == b"a"
+assert bytes("🌍", encoding="utf-8") == b"\xf0\x9f\x8c\x8d"
+
+class ByteTokenizer(Tokenizer):
+    """Represent a string as a sequence of bytes."""
+    def encode(self, string: str) -&gt; list[int]:
+        string_bytes = string.encode("utf-8")
+        indices = list(map(int, string_bytes))
+        return indices
+
+    def decode(self, indices: list[int]) -&gt; str:
+        string_bytes = bytes(indices)
+        string = string_bytes.decode("utf-8")
+        return string
+
+# "Hello, 🌍! 你好!" → [72, 101, 108, 108, 111, 44, 32, 240, 159, 140, 141, 33, 32,
+#                       228, 189, 160, 229, 165, 189, 33]
+</code></pre>
+
+    <p>The vocabulary is nice and small: a byte can represent 256 values. What about the compression rate? It is exactly <strong>1</strong>.</p>
+    <p>The compression ratio is terrible, which means the sequences will be too long. Given that the context length of a Transformer is limited (since attention is quadratic), this is not looking great…</p>
+
+    <h3>Word tokenizer</h3>
+    <p>Another approach (closer to what was done classically in NLP) is to split strings into words.</p>
+
+    <pre><code class="language-python">string = "I'll say supercalifragilisticexpialidocious!"
+chunks = regex.findall(r"\w+|.", string)
+# ['I', "'", 'll', ' ', 'say', ' ', 'supercalifragilisticexpialidocious', '!']
+</code></pre>
+
+    <p>This regular expression keeps all alphanumeric characters together (words). To turn this into a <code>Tokenizer</code>, we need to map these chunks into integers. Then, we can build a mapping from each chunk into an integer.</p>
+    <p>What's good: each token is meaningful (since humans invented words).</p>
+    <p>Vocabulary size = number of distinct chunks in the training data. Compression ratio here: 44 bytes / 8 chunks = 5.5. Compression ratio is good, but vocabulary size can be huge. Moreover:</p>
+    <ul>
+      <li>Many words are rare and the model won't learn much about them.</li>
+      <li>This doesn't obviously provide a fixed vocabulary size.</li>
+      <li>New words we haven't seen during training get a special UNK token, which is ugly and can mess up perplexity calculations.</li>
+    </ul>
+
+    <h3>Comparison</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tokenizer</th><th>Vocabulary size</th><th>Compression ratio</th><th>Problem</th></tr></thead>
+        <tbody>
+          <tr><td>Character</td><td>~150K (≥ 127,758)</td><td>1.54</td><td>large vocab, rare characters, poor compression</td></tr>
+          <tr><td>Byte</td><td>256</td><td>1.0</td><td>sequences far too long</td></tr>
+          <tr><td>Word</td><td>unbounded</td><td>5.5</td><td>huge vocab, rare words, UNK</td></tr>
+          <tr><td>GPT-5 (BPE)</td><td>200,019</td><td>2.5</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Character, byte and GPT-5 ratios are on <code>"Hello, 🌍! 你好!"</code>; the word ratio is on the supercalifragilistic sentence.</p>
+
+    <h3>Byte Pair Encoding (BPE)</h3>
+    <p>The BPE algorithm was introduced by Philip Gage in 1994 for data compression. <a href="http://www.pennelynn.com/Documents/CUJ/HTML/94HTML/19940045.HTM" target="_blank" rel="noopener">[article]</a> It was adapted to NLP for neural machine translation. <a href="https://arxiv.org/abs/1508.07909" target="_blank" rel="noopener" title="Neural Machine Translation of Rare Words with Subword Units">[Sennrich+ 2015]</a> (Previously, papers had been using word-based tokenization.) BPE was then used by GPT-2. <a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf" target="_blank" rel="noopener" title="Language Models are Unsupervised Multitask Learners">[Radford+ 2019]</a></p>
+
+    <div class="callout callout--tip">
+      <p class="callout__title">Basic idea</p>
+      <p><em>Train</em> the tokenizer on raw text to construct a vocabulary tailored to the data.</p>
+      <p>Intuition: common sequences of bytes are represented by a single token, rare sequences are represented by many tokens.</p>
+    </div>
+
+    <p>Sketch: start with each byte as a token, and successively merge the most common pair of adjacent tokens.</p>
+
+    <h4>Training the tokenizer</h4>
+
+    <ol class="steps">
+      <li>Start with the list of bytes of <code>string</code>; the vocab is the 256 single bytes.</li>
+      <li>Count the number of occurrences of each pair of adjacent tokens.</li>
+      <li>Find the most common pair.</li>
+      <li>Merge that pair into a new index <code>256 + i</code>; record it in <code>merges</code> and <code>vocab</code>. Repeat for <code>num_merges</code> rounds.</li>
+    </ol>
+
+    <pre><code class="language-python">def train_bpe(string: str, num_merges: int) -&gt; BPETokenizerParams:
+    indices = list(map(int, string.encode("utf-8")))
+    merges: dict[tuple[int, int], int] = {}  # index1, index2 =&gt; merged index
+    vocab: dict[int, bytes] = {x: bytes([x]) for x in range(256)}  # index -&gt; bytes
+
+    for i in range(num_merges):
+        # Count the number of occurrences of each pair of tokens
+        counts = count_adjacent_pairs(indices)
+
+        # Find the most common pair
+        pair = max(counts, key=counts.get)
+
+        # Merge that pair
+        new_index = 256 + i
+        merges[pair] = new_index
+        vocab[new_index] = vocab[pair[0]] + vocab[pair[1]]
+        indices = merge(indices, pair, new_index)
+
+    return BPETokenizerParams(vocab=vocab, merges=merges)
+
+
+def count_adjacent_pairs(indices: list[int]) -&gt; dict[tuple[int, int], int]:
+    """Return a dictionary mapping each adjacent pair of tokens in `indices` to the number of times it occurs."""
+    counts = defaultdict(int)
+    for index1, index2 in zip(indices, indices[1:]):
+        counts[(index1, index2)] += 1
+    return counts
+
+
+def merge(indices: list[int], pair: tuple[int, int], new_index: int) -&gt; list[int]:
+    """Return `indices`, but with all instances of `pair` replaced with `new_index`."""
+    new_indices = []
+    i = 0
+    while i &lt; len(indices):
+        if i + 1 &lt; len(indices) and indices[i] == pair[0] and indices[i + 1] == pair[1]:
+            new_indices.append(new_index)
+            i += 2
+        else:
+            new_indices.append(indices[i])
+            i += 1
+    return new_indices
+
+
+@dataclass(frozen=True)
+class BPETokenizerParams:
+    """All you need to specify a BPETokenizer."""
+    vocab: dict[int, bytes]             # index -&gt; bytes
+    merges: dict[tuple[int, int], int]  # index1,index2 -&gt; new_index
+</code></pre>
+
+    <div class="callout callout--example">
+      <p class="callout__title">Example <span class="name">train_bpe("the cat in the hat", num_merges=3)</span></p>
+      <p>Start: <code>[116, 104, 101, 32, 99, 97, 116, 32, 105, 110, 32, 116, 104, 101, 32, 104, 97, 116]</code> — 18 bytes.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Merge</th><th>Pair (count)</th><th>New token</th><th>Indices after merge</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td><code>(116, 104)</code> = <code>t</code>+<code>h</code> (2)</td><td><code>256</code> = <code>b"th"</code></td><td><code>[256, 101, 32, 99, 97, 116, 32, 105, 110, 32, 256, 101, 32, 104, 97, 116]</code></td></tr>
+            <tr><td>2</td><td><code>(256, 101)</code> = <code>th</code>+<code>e</code> (2)</td><td><code>257</code> = <code>b"the"</code></td><td><code>[257, 32, 99, 97, 116, 32, 105, 110, 32, 257, 32, 104, 97, 116]</code></td></tr>
+            <tr><td>3</td><td><code>(257, 32)</code> = <code>the</code>+<code>␣</code> (2)</td><td><code>258</code> = <code>b"the "</code></td><td><code>[258, 99, 97, 116, 32, 105, 110, 32, 258, 104, 97, 116]</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>End: 18 bytes / 12 tokens = compression ratio <strong>1.5</strong>.</p>
+      <p>In round 1, <code>(104, 101)</code>, <code>(101, 32)</code> and <code>(97, 116)</code> also have count 2 — <code>max</code> breaks the tie by taking the first pair it saw.</p>
+    </div>
+
+    <h4>Using the tokenizer</h4>
+    <p>Now, given a new text, we can encode it.</p>
+
+    <pre><code class="language-python">class BPETokenizer(Tokenizer):
+    """BPE tokenizer given a set of merges and a vocabulary."""
+    def __init__(self, params: BPETokenizerParams):
+        self.params = params
+
+    def encode(self, string: str) -&gt; list[int]:
+        indices = list(map(int, string.encode("utf-8")))
+        # Note: this is a very slow implementation
+        for pair, new_index in self.params.merges.items():
+            indices = merge(indices, pair, new_index)
+        return indices
+
+    def decode(self, indices: list[int]) -&gt; str:
+        bytes_list = list(map(self.params.vocab.get, indices))
+        string = b"".join(bytes_list).decode("utf-8")
+        return string
+
+# "the quick brown fox" → [258, 113, 117, 105, 99, 107, 32, 98, 114, 111, 119, 110, 32, 102, 111, 120]
+</code></pre>
+
+    <p>Only <code>"the "</code> was learned, so it becomes the single token <code>258</code>; the rest of the new text falls back to raw bytes.</p>
+
+    <div class="callout callout--warning">
+      <p class="callout__title">In Assignment 1, you will go beyond this</p>
+      <ul>
+        <li><code>encode()</code> currently loops over all merges. Only loop over merges that matter.</li>
+        <li>Detect and preserve special tokens (e.g., <code>&lt;|endoftext|&gt;</code>).</li>
+        <li>Use pre-tokenization (e.g., the GPT-2 tokenizer regex).</li>
+        <li>Try to make the implementation as fast as possible.</li>
+      </ul>
+    </div>
+
+    <h3>Summary</h3>
+    <ul>
+      <li>Tokenizer: strings ↔ tokens (indices)</li>
+      <li>Character-based, byte-based, word-based tokenization are highly suboptimal</li>
+      <li>BPE is an effective heuristic that is data-driven</li>
+      <li>Tokenization is a separate step, maybe one day do it end-to-end from bytes…</li>
+    </ul>
+    <p>But whatever solution needs to satisfy:</p>
+    <ol>
+      <li>Model (e.g., Transformer) should operate on chunks (abstractions) of the sequence (text, video, DNA, etc.)</li>
+      <li>Chunks should be variable (allocate more model capacity to interesting chunks)</li>
+    </ol>
+
+    <div class="callout callout--note">
+      <p class="callout__title">Next time</p>
+      <p>Resource accounting.</p>
+    </div>
+
+    <h2>Key terms</h2>
+    <dl class="terms">
+      <dt>Tokenizer</dt><dd>Converts between raw inputs (bytes) and sequences of integers (tokens), via <code>encode</code> and <code>decode</code>.</dd>
+      <dt>Compression ratio</dt><dd>UTF-8 bytes per token. Higher means shorter sequences, which matters because attention is quadratic in sequence length.</dd>
+      <dt>Vocabulary size</dt><dd>Number of possible token values. Bigger vocab buys compression at the cost of sparsity (rare tokens).</dd>
+      <dt>BPE (Byte-Pair Encoding)</dt><dd>Start from bytes, repeatedly merge the most frequent adjacent pair into a new token; the merges are the learned tokenizer.</dd>
+      <dt>Scaling recipe</dt><dd>A map FLOPs → hyperparameters, tuned at small scale and extrapolated with a fitted scaling law.</dd>
+      <dt>\(C = 6ND\)</dt><dd>Training FLOPs for \(N\) parameters on \(D\) tokens. Chinchilla-optimal is roughly \(D \approx 20N\).</dd>
+      <dt>Prefill / decode</dt><dd>The two inference phases: prefill processes the prompt all at once (compute-bound); decode generates one token at a time (memory-bound).</dd>
+      <dt>Kernel fusion</dt><dd>Doing several operations per HBM round-trip to minimize data movement.</dd>
+      <dt>Open-weight vs open-source</dt><dd>Open-weight: weights + paper. Open-source: weights + paper + code + data.</dd>
+    </dl>
+
+
+    <!-- PAGER:START -->
+    <nav class="pager">
+      <a class="prev empty"><span class="dir">Start of course</span><span class="ttl">—</span></a>
+      <a class="next" href="02-resource-accounting.html"><span class="dir">Next →</span><span class="ttl">Resource Accounting</span></a>
+    </nav>
+    <!-- PAGER:END -->
+  </main>
+</div>
+</body>
+</html>

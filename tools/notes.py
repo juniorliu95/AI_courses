@@ -144,7 +144,7 @@ def build_root_index(courses):
     else:
         cards_block = f'<ul class="cards">\n{cards}\n    </ul>'
     body = f"""<header class="topbar">
-  <a class="topbar__brand" href="index.html">AI Notes<span class="dot">.</span></a>
+  <a class="topbar__brand" href="index.html">Junyu's AI Notes<span class="dot">.</span></a>
   <span class="topbar__spacer"></span>
   <button class="iconbtn" data-theme-toggle aria-label="Toggle theme">☾</button>
 </header>
@@ -196,6 +196,8 @@ def build_course_index(c):
     src = (f'<li><a class="chip chip--accent" href="{e(c["source"])}" target="_blank" rel="noopener">Course page ↗</a></li>'
            if c.get("source") else "")
     tags = "".join(f'<li class="chip">{e(t)}</li>' for t in (c.get("tags") or []))
+    links = "".join(f'<li><a class="chip chip--accent" href="{e(l["href"])}">{e(l["label"])}</a></li>'
+                    for l in (c.get("links") or []))
     body = f"""<header class="topbar">
   <a class="topbar__brand" href="../../index.html">AI Notes<span class="dot">.</span></a>
   <nav class="crumbs" aria-label="Breadcrumb">
@@ -210,7 +212,7 @@ def build_course_index(c):
     <p class="kicker">{e(' · '.join(meta_bits))}</p>
     <h1>{e(c.get('title'))}</h1>
     <p>{e(c.get('description'))}</p>
-    <ul class="chips">{tags}{src}</ul>
+    <ul class="chips">{tags}{links}{src}</ul>
   </div>
 
   <div class="toolbar">

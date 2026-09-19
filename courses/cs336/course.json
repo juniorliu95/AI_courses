@@ -1,0 +1,19 @@
+{
+  "title": "Language Modeling from Scratch",
+  "code": "CS336",
+  "org": "Stanford",
+  "description": "Building a language model end to end: tokenization, transformers, systems and kernels, scaling laws, data curation, and alignment.",
+  "source": "https://stanford-cs336.github.io/spring2025/",
+  "tags": [
+    "language models",
+    "transformers",
+    "systems"
+  ],
+  "order": 1,
+  "links": [
+    {
+      "label": "Coding assignments →",
+      "href": "assignments/"
+    }
+  ]
+}

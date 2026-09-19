@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resource Accounting · Language Modeling from Scratch</title>
+<meta name="description" content="Memory and compute accounting for training: tensors and floating-point formats (fp32 → fp4), einops, FLOPs and MFU, arithmetic intensity and rooflines, the 6ND rule, optimizer state, gradient accumulation and activation checkpointing.">
+<meta name="note:course" content="Language Modeling from Scratch">
+<meta name="note:number" content="02">
+<meta name="note:date" content="2026-09-19">
+<meta name="note:tags" content="resource accounting, precision, einops, FLOPs, roofline">
+<script>(function(){try{var t=localStorage.getItem('notes-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../../assets/notes.js"></script>
+</head>
+<body>
+<div class="progress"><div class="progress__bar" id="progressBar"></div></div>
+
+<header class="topbar">
+  <button class="iconbtn sidebar-toggle" data-sidebar-toggle aria-label="Toggle contents">☰</button>
+  <a class="topbar__brand" href="../../index.html">AI Notes<span class="dot">.</span></a>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <span class="sep">/</span>
+    <!-- CRUMB:START --><a href="index.html">Language Modeling from Scratch</a><!-- CRUMB:END -->
+    <span class="sep">/</span>
+    <span class="current">Resource Accounting</span>
+  </nav>
+  <span class="topbar__spacer"></span>
+  <button class="iconbtn" data-theme-toggle aria-label="Toggle theme">☾</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar__label">Course</p>
+    <a class="sidebar__course" href="index.html">Language Modeling from Scratch</a>
+    <p class="sidebar__meta">Lecture 02 · 2026-09-19</p>
+
+    <p class="sidebar__label">On this page</p>
+    <nav class="toc" id="toc" aria-label="Table of contents"></nav>
+
+    <!-- SIBLINGS:START -->
+    <hr>
+    <p class="sidebar__label">Lectures</p>
+    <nav class="toc">
+      <ul>
+        <li><a href="01-overview-and-tokenization.html">01 · Overview and Tokenization</a></li>
+        <li><a href="02-resource-accounting.html" class="is-active">02 · Resource Accounting</a></li>
+      </ul>
+    </nav>
+  <!-- SIBLINGS:END -->
+  </aside>
+
+  <main class="content" id="content">
+    <div class="lecture-head">
+      <p class="kicker">Language Modeling from Scratch · Lecture 02</p>
+      <h1>Resource Accounting</h1>
+      <p class="lead">Memory and compute accounting for training: tensors and floating-point formats (fp32 → fp4), einops, FLOPs and MFU, arithmetic intensity and rooflines, the 6ND rule, optimizer state, gradient accumulation and activation checkpointing.</p>
+      <ul class="chips">
+        <li class="chip">2026-09-19</li>
+        <li class="chip">resource accounting, precision, einops, FLOPs, roofline</li>
+        <li><a class="chip chip--accent" href="https://cs336.stanford.edu/lectures/?trace=lecture_02" target="_blank" rel="noopener">Source ↗</a></li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <p class="panel__title">In one minute</p>
+      <ul>
+        <li>Goal: the best model given fixed resources — so first learn to <strong>account</strong> for memory and compute of any computation.</li>
+        <li>Memory = (# values) × (bytes per value). Formats trade range vs. resolution: fp32 → fp16 / <strong>bf16</strong> → fp8 → fp4; mixed precision keeps optimizer state in fp32.</li>
+        <li>A training step costs about <strong>\(6 \times\) (# data points) \(\times\) (# parameters)</strong> FLOPs: 2 forward, 4 backward.</li>
+        <li><strong>Arithmetic intensity</strong> (FLOPs per byte) vs. accelerator intensity decides memory-bound vs. compute-bound: matmuls are compute-bound, elementwise ops are memory-bound.</li>
+        <li>Gradient accumulation and activation checkpointing trade time/compute for memory, to afford bigger batches.</li>
+      </ul>
+    </div>
+
+    <h2>Announcements</h2>
+    <ul>
+      <li>Join the CS336 slack</li>
+      <li>Sign up on Modal with your <strong>Stanford</strong> email</li>
+      <li>Read the <a href="https://docs.google.com/document/d/1SZAlExB1qAc9izHt54gwunNpjKE6wXb8Y7yA_e-baK8/edit?tab=t.0" target="_blank" rel="noopener">AI policy guide</a></li>
+      <li>Read the <a href="https://docs.google.com/document/d/1cHE0iKVyXLJ3XpIs2XuXTmZ-HMmPk2hIPeCvy-AydMg/edit?tab=t.otis27tacaef" target="_blank" rel="noopener">cluster guide</a></li>
+    </ul>
+    <p>Marin 1e23 FLOPs run finished and <a href="https://x.com/WilliamBarrHeld/status/2039373983632814318" target="_blank" rel="noopener">matched forecasts</a>!</p>
+
+    <figure>
+      <img src="images/l02/marin-1e23.jpg" width="800" alt="Delphi scaling suite: loss vs. training tokens curves for compute budgets 3e18 to 3e20, with forecast points at 1e21, 1e22 and 1e23 FLOPs landing within 0.011 loss of the compute-optimal frontier">
+      <figcaption>Delphi scaling suite: the 1e21 / 1e22 / 1e23 runs land within \(\Delta\text{loss} \le 0.011\) of the forecast.</figcaption>
+    </figure>
+
+    <p>Last lecture: overview, tokenization. <strong>Today: resource accounting (systems).</strong></p>
+    <p>Recall: what's the best model one can train given fixed resources (compute, memory)? In other words: maximize (computational) <strong>efficiency</strong>. Prerequisite: understand the resources (compute, memory) for a given computation.</p>
+
+    <h2>Motivating questions</h2>
+
+    <div class="callout callout--example">
+      <p class="callout__title">How long would it take to train a 70B parameter model on 15T tokens on 1024 H100s?</p>
+      <pre><code class="language-python">total_flops = 6 * 70e9 * 15e12                                     # 6.3e24
+h100_flop_per_sec = 1979e12 / 2
+mfu = 0.5
+flops_per_day = h100_flop_per_sec * mfu * 1024 * 60 * 60 * 24      # 4.38e22
+days = total_flops / flops_per_day                                 # ≈ 144 days
+</code></pre>
+    </div>
+
+    <div class="callout callout--example">
+      <p class="callout__title">What's the largest model that can you can train on 8 H100s using AdamW?</p>
+      <pre><code class="language-python">h100_bytes = 80e9
+bytes_per_parameter = 2 + 2 + (4 + 4)  # parameters (2), gradients (2), optimizer state (4 + 4) → 12
+num_parameters = (h100_bytes * 8) / bytes_per_parameter           # ≈ 5.3e10 (53B)
+</code></pre>
+      <p>Caveat: activations are not accounted for (depends on batch size and sequence length), so this is an upper bound.</p>
+    </div>
+
+    <p>This is a rough back-of-the-envelope calculation. But it gives you the flavor of napkin math one can quickly do to get a sense of resources.</p>
+
+    <div class="callout callout--tip">
+      <p class="callout__title">What knowledge to take away from this lecture</p>
+      <ul>
+        <li><strong>Mechanics:</strong> straightforward (PyTorch semantics)</li>
+        <li><strong>Mindset:</strong> resource accounting (remember to do it)</li>
+        <li><strong>Intuitions:</strong> get a sense of how resources are spent, no ML magic today</li>
+      </ul>
+    </div>
+
+    <h2>Memory accounting</h2>
+
+    <h3>Tensors basics</h3>
+    <p>Tensors are the basic building block for storing everything: data, parameters, gradients, optimizer state, activations.</p>
+    <p>Example: parameters of the DeepSeek v3.2 model <a href="https://arxiv.org/abs/2512.02556" target="_blank" rel="noopener" title="DeepSeek-V3.2: Pushing the Frontier of Open Large Language Models">[DeepSeek-AI+ 2025]</a> — see the <a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.2?show_file_info=model.safetensors.index.json" target="_blank" rel="noopener">DeepSeek v3.2 model on Hugging Face</a>.</p>
+    <p>Each tensor has a <strong>rank</strong>, which is the number of dimensions.</p>
+    <pre><code class="language-python">x = torch.zeros(4)        # rank 1 tensor (vector)
+x = torch.zeros(4, 8)     # rank 2 tensor (matrix)
+x = torch.zeros(4, 8, 2)  # rank 3 tensor
+</code></pre>
+    <p>In Transformers, will see tensors of rank 4:</p>
+    <pre><code class="language-python">B = 32   # Batch size
+S = 16   # Sequence length
+H = 16   # Number of heads
+D = 64   # Hidden dimension per head
+x = torch.zeros(B, S, H, D)
+</code></pre>
+
+    <h3>Tensors memory</h3>
+    <p>Elements of tensors are generally floating point numbers.</p>
+
+    <h4>fp32</h4>
+    <figure>
+      <img src="images/l02/fp32.png" width="700" alt="fp32 bit layout: 1 sign bit, 8 exponent bits, 23 fraction bits">
+      <figcaption>fp32: 1 sign · 8 exponent · 23 fraction bits. <a href="https://en.wikipedia.org/wiki/Single-precision_floating-point_format" target="_blank" rel="noopener">[Wikipedia]</a></figcaption>
+    </figure>
+    <p>The fp32 data type (also known as float32 or single precision) is the default. Traditionally, in scientific computing, fp32 is the baseline; you could use double precision (fp64) in some cases. In deep learning, you can be a lot sloppier.</p>
+
+    <p>Let's examine memory usage of these tensors. Memory is determined by the (i) number of values and (ii) data type of each value.</p>
+    <pre><code class="language-python">x = torch.zeros(4, 8)
+assert x.dtype == torch.float32  # Default type
+assert x.numel() == 4 * 8
+assert x.element_size() == 4  # Float is 4 bytes
+assert get_memory_usage(x) == 4 * 8 * 4  # 128 bytes
+
+def get_memory_usage(x: torch.Tensor):
+    return x.numel() * x.element_size()
+</code></pre>
+    <p>One matrix in the feedforward layer of GPT-3:</p>
+    <pre><code class="language-python">assert get_memory_usage(torch.empty(12288 * 4, 12288)) == 2304 * 1024 * 1024  # 2.3 GB
+</code></pre>
+
+    <h4>fp16</h4>
+    <figure>
+      <img src="images/l02/fp16.png" width="400" alt="fp16 bit layout: 1 sign bit, 5 exponent bits, 10 fraction bits">
+      <figcaption>fp16: 1 sign · 5 exponent · 10 fraction bits. <a href="https://en.wikipedia.org/wiki/Half-precision_floating-point_format" target="_blank" rel="noopener">[Wikipedia]</a></figcaption>
+    </figure>
+    <p>The fp16 data type (also known as float16 or half precision) cuts down the memory.</p>
+    <pre><code class="language-python">x = torch.zeros(4, 8, dtype=torch.float16)
+assert x.element_size() == 2
+</code></pre>
+    <p>However, the dynamic range (especially for small numbers) isn't great.</p>
+    <pre><code class="language-python">x = torch.tensor([1e-8], dtype=torch.float16)  # tensor([0.], dtype=torch.float16)
+assert x == 0  # Underflow!
+</code></pre>
+    <div class="callout callout--warning">
+      <p class="callout__title">Underflow</p>
+      <p>If this happens when you train, you can get instability.</p>
+    </div>
+
+    <h4>bf16</h4>
+    <figure>
+      <img src="images/l02/bf16.png" width="400" alt="bfloat16 bit layout: 1 sign bit, 8 exponent bits, 7 fraction bits">
+      <figcaption>bf16: 1 sign · 8 exponent · 7 fraction bits. <a href="https://en.wikipedia.org/wiki/Bfloat16_floating-point_format" target="_blank" rel="noopener">[Wikipedia]</a></figcaption>
+    </figure>
+    <p>Google Brain developed brain floating point (bf16) in 2018 to address this issue. bf16 uses the same memory as fp16 but has the same dynamic range as fp32! The only catch is that the resolution is worse, but this matters less for deep learning.</p>
+    <pre><code class="language-python">x = torch.tensor([1e-8], dtype=torch.bfloat16)  # tensor([1.0012e-08], dtype=torch.bfloat16)
+assert x != 0  # No underflow!
+</code></pre>
+
+    <h4>Mixed precision</h4>
+    <p>Implications on training:</p>
+    <ul>
+      <li>Training with fp32 works, but requires lots of memory.</li>
+      <li>Training with fp16 and even bf16 is risky, and you can get instability.</li>
+    </ul>
+    <div class="callout callout--tip">
+      <p class="callout__title">Solution: mixed precision training <a href="https://arxiv.org/pdf/1710.03740.pdf" target="_blank" rel="noopener" title="Mixed Precision Training">[Micikevicius+ 2017]</a></p>
+      <ul>
+        <li>Use bf16 for parameters, activations, and gradients</li>
+        <li>Use fp32 for optimizer states</li>
+      </ul>
+    </div>
+    <p>PyTorch has an automatic mixed precision (AMP) library <a href="https://pytorch.org/docs/stable/amp.html" target="_blank" rel="noopener">[docs]</a>. Tries to cast things into bf16 when safe (matmuls, not exp).</p>
+    <pre><code class="language-python">with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+    x = torch.zeros(4, 8)  # still float32: autocast casts ops (e.g. matmuls), not tensor creation
+</code></pre>
+
+    <h4>fp8</h4>
+    <p>In 2022, fp8 was standardized, motivated by machine learning workloads <a href="https://docs.nvidia.com/deeplearning/transformer-engine/user-guide/examples/fp8_primer.html" target="_blank" rel="noopener">[primer]</a>.</p>
+    <figure>
+      <img src="images/l02/fp8-formats.png" width="600" alt="Bit layouts of fp8 E4M3 and E5M2 compared with fp16 and bf16">
+      <figcaption>The two fp8 variants, E4M3 and E5M2 (NVIDIA Transformer Engine).</figcaption>
+    </figure>
+    <p>H100s support two variants of FP8: <strong>E4M3</strong> (range \([-448, 448]\)) and <strong>E5M2</strong> (\([-57344, 57344]\)). Reference: <a href="https://arxiv.org/pdf/2209.05433.pdf" target="_blank" rel="noopener" title="FP8 Formats for Deep Learning">[Micikevicius+ 2022]</a></p>
+
+    <h4>fp4</h4>
+    <p>In 2025, NVIDIA developed <a href="https://developer.nvidia.com/blog/introducing-nvfp4-for-efficient-and-accurate-low-precision-inference/" target="_blank" rel="noopener">nvfp4</a>. Only 4 bits per value!</p>
+    <p>Values: \(-6, -4, -3, -2, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2, 3, 4, 6\)</p>
+    <p>Use a separate scale factor per block, so actually get more dynamic range (but just can't vary freely from neighbors).</p>
+    <p>Nemotron 3 Super was trained in NVFP4 <a href="https://research.nvidia.com/labs/nemotron/files/NVIDIA-Nemotron-3-Super-Technical-Report.pdf" target="_blank" rel="noopener" title="Nemotron 3 Super: Open, Efficient Mixture-of-Experts Hybrid Mamba-Transformer Model for Agentic Reasoning">[NVIDIA 2026]</a>.</p>
+    <p>Some of this is done in NVIDIA libraries outside of user control.</p>
+
+    <h3>Tensors on GPUs</h3>
+    <p>By default, tensors are stored in CPU memory.</p>
+    <pre><code class="language-python">x = torch.zeros(32, 32)
+assert x.device == torch.device("cpu")
+</code></pre>
+    <p>However, what about GPUs?</p>
+    <figure>
+      <img src="images/l02/cpu-gpu.png" width="600" alt="CPU with RAM connected over the PCI bus to a GPU containing many streaming multiprocessors and DRAM">
+      <figcaption>CPU + RAM ↔ PCI bus ↔ GPU (streaming multiprocessors + DRAM).</figcaption>
+    </figure>
+    <p>In order to take advantage of the massive parallelism of GPUs, we need to move them to GPU memory.</p>
+    <pre><code class="language-python">device = cuda_if_available()  # cuda:0
+x = x.to(device)
+</code></pre>
+    <p>Or create the tensor directly on the GPU:</p>
+    <pre><code class="language-python">with torch.device(device):
+    x = torch.zeros(32, 32)
+    assert x.device == device
+</code></pre>
+
+    <h2>Compute accounting</h2>
+
+    <h3>Tensor einops</h3>
+    <p>Traditional PyTorch code:</p>
+    <pre><code class="language-python">x = torch.ones(2, 2, 3)      # batch seq hidden
+y = torch.ones(2, 2, 3)      # batch seq hidden
+z = x @ y.transpose(-2, -1)  # batch seq seq
+</code></pre>
+    <p>Easy to mess up the dimensions (what is -2, -1?)…</p>
+
+    <p><strong>Einops</strong> is a library for manipulating tensors where dimensions are named. It is inspired by Einstein summation notation (Einstein, 1916). <a href="https://einops.rocks/1-einops-basics/" target="_blank" rel="noopener">[Einops tutorial]</a></p>
+
+    <h4>einsum</h4>
+    <p>Einsum is generalized matrix multiplication with good bookkeeping.</p>
+    <pre><code class="language-python">x = torch.ones(3, 4)  # seq1 hidden
+y = torch.ones(4, 3)  # hidden seq2
+
+# Old way
+z = x @ y   # seq1 seq2
+
+# New (einops) way
+z = einsum(x, y, "seq1 hidden, hidden seq2 -&gt; seq1 seq2")  # shape (3, 3), all 4s
+</code></pre>
+    <p>Let's try a more complex example…</p>
+    <pre><code class="language-python">x = torch.ones(2, 3, 4)  # batch seq1 hidden
+y = torch.ones(2, 3, 4)  # batch seq2 hidden
+
+# Old way
+z = x @ y.transpose(-2, -1)  # batch seq1 seq2
+
+# New (einops) way
+z = einsum(x, y, "batch seq1 hidden, batch seq2 hidden -&gt; batch seq1 seq2")  # shape (2, 3, 3)
+
+# Or can use `...` to represent broadcasting over any number of dimensions
+z = einsum(x, y, "... seq1 hidden, ... seq2 hidden -&gt; ... seq1 seq2")
+</code></pre>
+    <div class="callout callout--note">
+      <p class="callout__title">Rule</p>
+      <p>Dimensions that are not named in the output are summed over.</p>
+    </div>
+
+    <h4>reduce</h4>
+    <p>You can reduce a single tensor via some operation (e.g., sum, mean, max, min).</p>
+    <pre><code class="language-python">x = torch.ones(2, 3, 4)  # batch seq hidden
+
+# Old way
+y = x.sum(dim=-1)  # shape (2, 3), all 4s
+
+# New (einops) way
+y = reduce(x, "... hidden -&gt; ...", "sum")
+</code></pre>
+
+    <h4>rearrange</h4>
+    <p>Sometimes, a dimension represents two dimensions… and you want to operate on one of them.</p>
+    <pre><code class="language-python">x = torch.ones(3, 8)  # seq total_hidden
+# ...where `total_hidden` is a flattened representation of `heads * hidden1`
+w = torch.ones(4, 4)  # hidden1 hidden2
+
+# Break up `total_hidden` into two dimensions (`heads` and `hidden1`)
+x = rearrange(x, "... (heads hidden1) -&gt; ... heads hidden1", heads=2)  # (3, 2, 4)
+
+# Perform the transformation by `w`
+x = einsum(x, w, "... hidden1, hidden1 hidden2 -&gt; ... hidden2")        # (3, 2, 4)
+
+# Combine `heads` and `hidden2` back together
+x = rearrange(x, "... heads hidden2 -&gt; ... (heads hidden2)")          # (3, 8)
+</code></pre>
+
+    <h3>Tensor operations FLOPs</h3>
+    <p>Having gone through all the operations, let us examine their computational cost.</p>
+    <p>A <strong>floating-point operation (FLOP)</strong> is a basic operation like addition (\(x + y\)) or multiplication (\(x y\)).</p>
+
+    <div class="callout callout--warning">
+      <p class="callout__title">Two terribly confusing acronyms (pronounced the same!)</p>
+      <ul>
+        <li><strong>FLOPs</strong>: floating-point operations (measure of computation done)</li>
+        <li><strong>FLOP/s</strong>: floating-point operations per second (also written as FLOPS), which is used to measure the speed of hardware.</li>
+      </ul>
+    </div>
+
+    <h4>Intuitions</h4>
+    <ul>
+      <li>Training GPT-3 (2020) took 3.14e23 FLOPs. <a href="https://lambdalabs.com/blog/demystifying-gpt-3" target="_blank" rel="noopener">[article]</a></li>
+      <li>Training GPT-4 (2023) is speculated to take 2e25 FLOPs. <a href="https://patmcguinness.substack.com/p/gpt-4-details-revealed" target="_blank" rel="noopener">[article]</a></li>
+      <li>H100 has a peak performance of 1979 teraFLOP/s with sparsity, 50% without. <a href="https://resources.nvidia.com/en-us-tensor-core/nvidia-tensor-core-gpu-datasheet" target="_blank" rel="noopener">[spec]</a></li>
+    </ul>
+    <p>8 H100s for 2 weeks:</p>
+    <pre><code class="language-python">h100_flop_per_sec = 1979e12 / 2
+total_flops = 8 * 2 * (60 * 60 * 24 * 7) * h100_flop_per_sec  # 9.58e21
+</code></pre>
+
+    <h4>Linear model</h4>
+    <pre><code class="language-python">B = 16384  # Number of points
+D = 32768  # Dimension of each point
+K = 8192   # Number of outputs
+x = torch.ones(B, D, device=cuda_if_available())
+w = torch.randn(D, K, device=cuda_if_available())
+y = x @ w
+</code></pre>
+    <p>How many FLOPs is this matmul? We have one multiplication (<code>x[i][j] * w[j][k]</code>) and one addition per \((i, j, k)\) triple.</p>
+    <p>$$ \text{FLOPs} = 2 \cdot B \cdot D \cdot K $$</p>
+    <pre><code class="language-python">actual_num_flops = 2 * B * D * K  # 8.80e12
+</code></pre>
+    <p>We can also time this operation to see how long it takes.</p>
+    <pre><code class="language-python">actual_time = benchmark(lambda: x @ w)                  # 0.165 s  (on an H100)
+actual_flop_per_sec = actual_num_flops / actual_time    # 5.34e13 FLOP/s
+
+def benchmark(func, num_trials: int = 5) -&gt; float:
+    """Return the number of seconds required to perform `func`."""
+    # Wait until previous CUDA threads are done
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+    def run():
+        # Perform the operation
+        func()
+        # Wait until CUDA threads are done
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
+    # Time the operation `num_trials` times
+    total_time = timeit.timeit(run, number=num_trials)
+    return total_time / num_trials
+</code></pre>
+    <p>Each GPU has a specification sheet that provides the peak performance. Example: <a href="https://resources.nvidia.com/en-us-gpu-resources/h100-datasheet-24306" target="_blank" rel="noopener">H100 spec</a>. Note that the FLOP/s depends heavily on the data type!</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>GPU</th><th>fp32 (FLOP/s)</th><th>bf16 / fp16 dense (FLOP/s)</th></tr></thead>
+        <tbody>
+          <tr><td>A100</td><td>19.5e12</td><td>312e12</td></tr>
+          <tr><td>H100</td><td>67.5e12</td><td>1979e12 / 2</td></tr>
+          <tr><td>B200</td><td>75e12</td><td>4.5e15 / 2</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <pre><code class="language-python">promised_flop_per_sec = get_promised_flop_per_sec(x.dtype)  # 6.75e13 (H100, float32)
+</code></pre>
+
+    <h4>Model FLOPs utilization (MFU)</h4>
+    <div class="callout callout--definition">
+      <p class="callout__title">Definition <span class="name">MFU</span></p>
+      <p>$$ \text{MFU} = \frac{\text{actual FLOP/s}}{\text{promised FLOP/s}} $$</p>
+      <p>(ignore communication/overhead)</p>
+    </div>
+    <pre><code class="language-python">mfu = actual_flop_per_sec / promised_flop_per_sec  # 0.79
+</code></pre>
+    <p>Usually, MFU of ≥ 0.5 is quite good!</p>
+    <p>But why is MFU not closer to 1? To answer this question, we need to look more closely at how computations are done on GPUs…</p>
+
+    <h3>Arithmetic intensity</h3>
+    <figure>
+      <img src="images/l01/compute-memory.png" width="300" alt="Diagram: memory and accelerator, with data moving between them">
+    </figure>
+    <p>How to compute a thing:</p>
+    <ol class="steps">
+      <li>Send inputs from memory to accelerator</li>
+      <li>Perform computation</li>
+      <li>Send outputs from accelerator to memory</li>
+    </ol>
+    <p>How long does this take? Depends on two things:</p>
+    <ol>
+      <li>Accelerator speed (FLOP/s) — H100: <code>1979e12 / 2</code> (half without sparsity)</li>
+      <li>Memory bandwidth (bytes/s) — H100: <code>3.35e12</code></li>
+    </ol>
+
+    <h4>ReLU</h4>
+    <pre><code class="language-python">n = 1024 * 1024
+x = torch.ones(n, dtype=torch.bfloat16, device=cuda_if_available())
+y = torch.relu(x)
+
+bytes = (2 * n) + (2 * n)  # Read x, write y (bf16 is 2 bytes/float)
+flops = n  # n comparisons
+
+communication_time = bytes / h100_bytes_per_sec  # 1.25e-06 s
+computation_time = flops / h100_flop_per_sec     # 1.06e-09 s
+</code></pre>
+    <p>Assume we can overlap communication and computation perfectly.</p>
+    <pre><code class="language-python">total_time = max(communication_time, computation_time)  # 1.25e-06 s
+</code></pre>
+    <p>What is the bottleneck?</p>
+    <ul>
+      <li><strong>Memory-bound</strong>: communication time &gt; computation time</li>
+      <li><strong>Compute-bound</strong>: computation time &gt; communication time</li>
+    </ul>
+    <p>In this case, ReLU is memory-bound.</p>
+
+    <p>Alternative way to see this:</p>
+    <div class="callout callout--definition">
+      <p class="callout__title">Definition <span class="name">Accelerator intensity vs. arithmetic intensity</span></p>
+      <p><strong>Accelerator intensity</strong>: how much work can the accelerator do per byte transferred?</p>
+      <p>$$ \text{accelerator intensity} = \frac{\text{FLOP/s}}{\text{bytes/s}} \approx 295 \text{ for H100 (bf16)} $$</p>
+      <p><strong>Arithmetic intensity</strong>: how much actual work per byte for this workload?</p>
+      <p>$$ \text{arithmetic intensity} = \frac{\text{FLOPs}}{\text{bytes}} $$</p>
+    </div>
+    <pre><code class="language-python">h100_accelerator_intensity = h100_flop_per_sec / h100_bytes_per_sec  # 295.37
+arithmetic_intensity = flops / bytes  # 0.25
+</code></pre>
+    <p>What is the bottleneck?</p>
+    <ul>
+      <li><strong>Memory-bound</strong>: arithmetic intensity &lt; accelerator intensity</li>
+      <li><strong>Compute-bound</strong>: arithmetic intensity &gt; accelerator intensity</li>
+    </ul>
+    <p>In general, we'll find ourselves memory bound. Can we increase arithmetic intensity?</p>
+
+    <h4>GeLU</h4>
+    <pre><code class="language-python">y = F.gelu(x)  # GELU(x) = 0.5 x (1 + tanh(sqrt(2/pi) (x + 0.044715 x^3)))
+
+bytes = (2 * n) + (2 * n)  # Read x, write y (bf16 is 2 bytes/float)
+flops = 20 * n  # tanh can be approximated in various ways (e.g., polynomials)
+
+arithmetic_intensity = flops / bytes  # 5.0  &lt; 295
+</code></pre>
+    <p>Note that GeLU does more work than ReLU per byte moved, so it has higher arithmetic intensity. But still memory-bound! In other words, ReLU is not faster than GeLU (when doing things in an isolated way).</p>
+
+    <h4>Dot product</h4>
+    <pre><code class="language-python">n = 1024 * 1024
+x = torch.ones(n, dtype=torch.bfloat16, device=cuda_if_available())
+w = torch.ones(n, dtype=torch.bfloat16, device=cuda_if_available())
+y = x @ w
+
+bytes = (2 * n) + (2 * n) + 2  # Read x, read w, write y
+flops = 2 * n - 1  # n multiplications, n-1 additions
+
+arithmetic_intensity = flops / bytes  # ~1/2  &lt; 295
+</code></pre>
+    <p>Memory-bound!</p>
+
+    <h4>Matrix-vector product</h4>
+    <pre><code class="language-python">n = 1024
+x = torch.ones(n, dtype=torch.bfloat16, device=cuda_if_available())
+w = torch.ones(n, n, dtype=torch.bfloat16, device=cuda_if_available())
+y = x @ w
+
+bytes = (2 * n) + (2 * n * n) + (2 * n)  # Read x, read w, write y
+flops = n * (2 * n - 1)  # n dot-products
+
+arithmetic_intensity = flops / bytes  # ~1  &lt; 295
+</code></pre>
+    <p>Memory-bound!</p>
+
+    <h4>Matrix-matrix product</h4>
+    <pre><code class="language-python">n = 1024
+x = torch.ones(n, n, dtype=torch.bfloat16, device=cuda_if_available())
+w = torch.ones(n, n, dtype=torch.bfloat16, device=cuda_if_available())
+y = x @ w
+
+bytes = (2 * n * n) + (2 * n * n) + (2 * n * n)  # Read x, read w, write y
+flops = n * n * (2 * n - 1)  # n^2 dot products
+
+arithmetic_intensity = flops / bytes  # ~n/3 = 341  &gt; 295
+</code></pre>
+    <p><strong>Finally, compute-bound!</strong></p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Operation (bf16, H100)</th><th>Arithmetic intensity</th><th>Bound</th></tr></thead>
+        <tbody>
+          <tr><td>ReLU</td><td>0.25</td><td>memory</td></tr>
+          <tr><td>GeLU</td><td>5</td><td>memory</td></tr>
+          <tr><td>Dot product</td><td>~1/2</td><td>memory</td></tr>
+          <tr><td>Matrix-vector (\(n = 1024\))</td><td>~1</td><td>memory</td></tr>
+          <tr><td>Matrix-matrix (\(n = 1024\))</td><td>~\(n/3\) = 341</td><td>compute</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout--tip">
+      <p class="callout__title">Takeaways</p>
+      <ul>
+        <li>As long as we have large matrices, we're compute-bound (saturating the accelerator).</li>
+        <li>Training Transformers involves big matrix multiplications.</li>
+        <li>Matrix-vector product is what happens during inference, which is why inference is memory-bound.</li>
+      </ul>
+      <p>Note: arithmetic/accelerator intensity also depends on the precision (bf16 versus fp32).</p>
+    </div>
+
+    <h4>Roofline plots</h4>
+    <p>We can visualize the relationship between arithmetic intensity and performance using roofline plots.</p>
+    <figure>
+      <img src="images/l02/roofline.webp" width="600" alt="Roofline plot: attainable FLOP/s vs. arithmetic intensity on log axes; each hardware is a line rising with slope equal to bandwidth until it flattens at peak FLOP/s">
+      <figcaption>Roofline plot. <a href="https://jax-ml.github.io/scaling-book/roofline/" target="_blank" rel="noopener">[reference]</a></figcaption>
+    </figure>
+    <ul>
+      <li>Each slice on the x-axis is a particular computation (with some arithmetic intensity)</li>
+      <li>Each piecewise linear function corresponds to a particular hardware</li>
+      <li>Kink is the accelerator intensity (transition from memory-bound to compute-bound)</li>
+    </ul>
+    <p>We can now relate this back to MFU:</p>
+    <p>$$ \text{MFU} = \min\left(1, \frac{\text{arithmetic intensity}}{\text{accelerator intensity}}\right) $$</p>
+
+    <h2>Memory and compute accounting for training</h2>
+
+    <h3>Deep network</h3>
+    <figure>
+      <img src="images/l02/deep-network.png" width="800" alt="A B×D input passes through three blocks of a D×D linear layer followed by ReLU, producing a B×D output">
+      <figcaption>Input \(B \times D\) → (linear \(D \times D\) → ReLU) × 3 → output \(B \times D\).</figcaption>
+    </figure>
+    <p>Consider a deep network with \(L\) layers and \(D\)-dimensional inputs, activations, and outputs.</p>
+    <pre><code class="language-python">class Block(nn.Module):
+    """Simple block that applies a linear transformation followed by a ReLU nonlinearity."""
+    def __init__(self, dim: int):
+        super().__init__()
+        self.weight = nn.Parameter(torch.randn(dim, dim) / math.sqrt(dim))
+
+    def forward(self, x: torch.Tensor) -&gt; torch.Tensor:
+        x = x @ self.weight  # Linear
+        x = F.relu(x)        # Activation
+        return x
+
+
+class DeepNetwork(nn.Module):
+    """Map `dim`-vector to a `dim`-vector."""
+    def __init__(self, dim: int, num_layers: int):
+        super().__init__()
+        self.layers = nn.ModuleList([Block(dim) for i in range(num_layers)])
+
+    def forward(self, x: torch.Tensor) -&gt; torch.Tensor:
+        # Apply all the layers sequentially
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+D = 8  # Dimensionality of input, activations, and output
+L = 3  # Number of layers
+model = DeepNetwork(dim=D, num_layers=L).to(cuda_if_available())
+
+num_parameters = get_num_parameters(model)  # 192
+assert num_parameters == (D * D) * L
+
+# Run the model on a batch of data
+B = 4  # Batch size
+x = torch.randn(B, D, device=cuda_if_available())
+y = model(x)  # shape (4, 8)
+</code></pre>
+
+    <h3>Gradients basics</h3>
+    <p>So far, we've constructed tensors and passed them through operations (forward). Now, we're going to compute the gradient (backward).</p>
+    <p>As a simple example, let's consider the simple linear model: \(y = 0.5\,(x \cdot w - 5)^2\)</p>
+    <pre><code class="language-python"># Forward pass: compute loss
+x = torch.tensor([1., 2, 3])
+w = torch.tensor([1., 1, 1], requires_grad=True)  # Want gradient
+pred_y = x @ w
+loss = 0.5 * (pred_y - 5).pow(2)
+
+# Backward pass: compute gradients
+loss.backward()
+assert torch.equal(w.grad, torch.tensor([1, 2, 3]))  # w.grad = (x·w − 5) x = 1 · x
+</code></pre>
+
+    <h3>Gradients FLOPs</h3>
+    <p>Let us count the FLOPs for computing gradients. Define a simplified model (2-layer linear network):</p>
+    <pre><code class="language-python">B = 1024  # Number of points
+D = 256   # Dimension
+x = torch.ones(B, D, device=cuda_if_available())
+w1 = torch.randn(D, D, device=cuda_if_available(), requires_grad=True)
+w2 = torch.randn(D, D, device=cuda_if_available(), requires_grad=True)
+
+# Forward pass
+h1 = einsum(x, w1, "batch in, in out -&gt; batch out")   # x @ w1
+h2 = einsum(h1, w2, "batch in, in out -&gt; batch out")  # h1 @ w2
+loss = (h2.mean() - 0)**2  # Regress everything to 0 (arbitrary)
+
+# Backward pass
+h1.retain_grad()  # For debugging
+h2.retain_grad()  # For debugging
+loss.backward()
+</code></pre>
+
+    <h4>Zoom in on one layer</h4>
+    <p>Let's focus on the second layer (<code>h2 = h1 @ w2</code>).</p>
+    <p><strong>Forward pass</strong>: recall the number of forward FLOPs:</p>
+    <pre><code class="language-python">num_forward_flops = 2 * B * D * D   # 134,217,728
+</code></pre>
+    <p><strong>Backward pass</strong>: how many FLOPs is running the backward pass? We need to compute:</p>
+    <ul>
+      <li><code>h1.grad</code> = d loss / d h1</li>
+      <li><code>w2.grad</code> = d loss / d w2</li>
+    </ul>
+    <pre><code class="language-python">h1_grad = einsum(h2.grad, w2, "batch out, in out -&gt; batch in")
+assert torch.allclose(h1.grad, h1_grad)
+
+w2_grad = einsum(h2.grad, h1, "batch out, batch in -&gt; in out")
+assert torch.allclose(w2.grad, w2_grad)
+
+num_backward_flops = (2 * B * D * D) + (2 * B * D * D)  # 268,435,456
+</code></pre>
+    <p>Note that the backward pass is <strong>2x more expensive</strong> than the forward pass.</p>
+
+    <h4>Consider all layers</h4>
+    <p>This was just for w2, need to apply it to all parameters in the network. Putting it together:</p>
+    <div class="callout callout--theorem">
+      <p class="callout__title">FLOPs per training step</p>
+      <ul>
+        <li>Forward pass: 2 (# data points) (# parameters) FLOPs</li>
+        <li>Backward pass: 4 (# data points) (# parameters) FLOPs</li>
+        <li>Total: <strong>6 (# data points) (# parameters) FLOPs</strong></li>
+      </ul>
+    </div>
+    <p>This is for multilayer perceptrons (MLPs)… but it turns out to be a good approximation for Transformers for short context lengths as well.</p>
+
+    <h3>Optimizer</h3>
+    <p>Recall our deep network (<code>B = 2</code>, <code>D = 4</code>, <code>L = 3</code>). Let's define the AdaGrad optimizer:</p>
+    <ul>
+      <li>momentum = SGD + exponential averaging of grad</li>
+      <li>AdaGrad = SGD + averaging by grad<sup>2</sup></li>
+      <li>RMSProp = AdaGrad but with exponential averaging of grad<sup>2</sup></li>
+      <li>Adam = RMSProp + momentum</li>
+    </ul>
+    <p>AdaGrad <a href="https://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf" target="_blank" rel="noopener">[Duchi+ 2011]</a>:</p>
+    <pre><code class="language-python">class AdaGrad(torch.optim.Optimizer):
+    def __init__(self, params: Iterable[nn.Parameter], lr: float = 0.01):
+        super(AdaGrad, self).__init__(params, dict(lr=lr))
+
+    def step(self):
+        for group in self.param_groups:
+            lr = group["lr"]
+            for p in group["params"]:
+                # Optimizer state
+                state = self.state[p]
+                grad = p.grad.data
+
+                # Get squared gradients g2 = sum_{i&lt;t} g_i^2
+                g2 = state.get("g2", torch.zeros_like(grad))
+
+                # Update optimizer state
+                g2 += torch.square(grad)
+                state["g2"] = g2
+
+                # Update parameters
+                p.data -= lr * grad / torch.sqrt(g2 + 1e-5)
+</code></pre>
+    <pre><code class="language-python">optimizer = AdaGrad(model.parameters(), lr=0.01)
+state = model.state_dict()  # {"layers.0.weight": ..., "layers.1.weight": ..., "layers.2.weight": ...}
+
+# Compute gradients
+x = torch.randn(B, D, device=cuda_if_available())
+y = torch.tensor([4., 5.], device=cuda_if_available())
+pred_y = model(x).mean()
+loss = F.mse_loss(input=pred_y, target=y)
+loss.backward()
+
+# Take a step
+optimizer.step()
+optimizer_state = {i: dict(p_state) for i, (p, p_state) in enumerate(optimizer.state.items())}
+# {0: {"g2": 4×4 tensor}, 1: {"g2": ...}, 2: {"g2": ...}}  — one g2 per parameter tensor
+
+# Free up the memory
+optimizer.zero_grad(set_to_none=True)
+</code></pre>
+
+    <h4>Memory</h4>
+    <pre><code class="language-python">num_parameters = D * D * L
+parameter_memory = 2 * num_parameters        # (2 bytes for bf16)  96
+gradient_memory = 2 * num_parameters         # (2 bytes for bf16)  96
+optimizer_state_memory = 4 * num_parameters  # (4 bytes for fp32)  192
+activation_memory = 2 * (B * D * L)          # (2 bytes for bf16)  48
+
+# Putting it all together
+total_memory = parameter_memory + activation_memory + gradient_memory + optimizer_state_memory  # 432
+</code></pre>
+    <p>It is customary to use fp32 for stability (accumulating averages over powers over many steps). Optimizer state memory:</p>
+    <ul>
+      <li>AdaGrad: 4 bytes/parameter for storing second moments</li>
+      <li>Adam: 8 bytes/parameter for storing first and second moments</li>
+    </ul>
+
+    <h4>Compute (for one training step)</h4>
+    <pre><code class="language-python">flops = 6 * B * num_parameters  # 576
+</code></pre>
+
+    <h4>Transformers</h4>
+    <p>The accounting for a Transformer is more complicated, but the same idea. Assignment 1 will ask you to do that.</p>
+    <ul>
+      <li>Blog post describing memory usage for Transformer training <a href="https://erees.dev/transformer-memory/" target="_blank" rel="noopener">[article]</a></li>
+      <li>Blog post describing FLOPs for a Transformer <a href="https://www.adamcasson.com/posts/transformer-flops" target="_blank" rel="noopener">[article]</a></li>
+    </ul>
+
+    <h3>Train loop</h3>
+    <pre><code class="language-python"># True linear function with weights (0, 1, 2, ..., D-1)
+D = 16  # Dimensionality
+true_w = torch.arange(D, dtype=torch.float32, device=cuda_if_available())
+
+# Data loader that generates (x, y) pairs
+B = 4  # Batch size
+def get_batch() -&gt; tuple[torch.Tensor, torch.Tensor]:
+    x = torch.randn(B, D).to(cuda_if_available())
+    true_y = x @ true_w
+    return (x, true_y)
+
+# Define the model and optimizer
+L = 2  # Number of layers
+model = DeepNetwork(dim=D, num_layers=L).to(cuda_if_available())
+optimizer = AdaGrad(model.parameters(), lr=0.01)
+
+# Train!
+num_train_steps = 10
+for t in range(num_train_steps):
+    # Get data
+    x, y = get_batch()
+
+    # Forward (compute loss)
+    pred_y = model(x).mean()
+    loss = F.mse_loss(pred_y, y)
+
+    # Backward (compute gradients)
+    loss.backward()
+
+    # Update parameters
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+</code></pre>
+
+    <h2>More memory optimizations</h2>
+
+    <h3>Gradient accumulation</h3>
+    <p>Large batch sizes: improve training stability. However, activation memory scales with batch size, so might run out.</p>
+    <pre><code class="language-python">B = 64     # Batch size
+D = 1024   # Dimensionality
+L = 16     # Number of layers
+activation_memory = 2 * B * D * L  # (2 bytes for bf16)  2,097,152
+</code></pre>
+    <ol class="steps">
+      <li>Compute gradient on micro batches</li>
+      <li>Accumulate the gradients (don't zero it out)</li>
+      <li>Every <code>batch_size / micro_batch_size</code> steps, update the parameters and zero out the gradients</li>
+    </ol>
+    <pre><code class="language-python">micro_batch_size = 256
+activation_memory = 2 * micro_batch_size * D * L  # (2 bytes for bf16)  8,388,608
+</code></pre>
+    <div class="callout callout--question">
+      <p class="callout__title">Odd numbers in the source</p>
+      <p>As written, <code>micro_batch_size = 256</code> is <em>larger</em> than <code>B = 64</code>, so the "reduced" activation memory comes out 4× bigger. The intended point: activation memory scales with the <strong>micro</strong>-batch size, so a micro batch smaller than the batch cuts it proportionally, while the effective batch size stays the same.</p>
+    </div>
+
+    <h3>Activation checkpointing</h3>
+    <p>For training, we need to store the activations of all layers. For inference, we don't compute gradients, so we only need to store the current layer's activations.</p>
+    <figure>
+      <img src="images/l02/deep-network.png" width="500" alt="Deep network diagram: stacked linear + ReLU blocks">
+    </figure>
+    <p>The memory usage is:</p>
+    <pre><code class="language-python">B = 64     # Batch size
+D = 1024   # Dimensionality
+L = 16     # Number of layers
+
+x = torch.randn(B, D, device=cuda_if_available(), requires_grad=True)
+activation_memory = 2 * B * D * L  # 2,097,152
+
+model = DeepNetwork(dim=D, num_layers=L).to(cuda_if_available())
+memory = get_max_memory_usage(lambda: model(x).sum().backward())  # 202,114,048
+</code></pre>
+    <p>Can we reduce this?</p>
+
+    <div class="callout callout--definition">
+      <p class="callout__title">Definition <span class="name">Activation checkpointing = gradient checkpointing = rematerialization</span></p>
+      <p>Key idea:</p>
+      <ul>
+        <li>Forward pass: keep only activations at subset of layers</li>
+        <li>Backward pass: recompute the missing activations from the last checkpoint</li>
+      </ul>
+      <p>Philosophy: <strong>tradeoff memory for compute</strong>.</p>
+    </div>
+    <pre><code>Store all activations:    x g1 h1 g2 h2 g3 h3 g4 h4
+Activation checkpointing: x    h1    h2    h3    h4
+</code></pre>
+    <pre><code class="language-python">class DeepNetworkCheckpointed(nn.Module):
+    """Same as DeepNetwork, but with activation checkpointing."""
+    def __init__(self, dim: int, num_layers: int):
+        super().__init__()
+        self.layers = nn.ModuleList([Block(dim) for i in range(num_layers)])
+
+    def forward(self, x: torch.Tensor) -&gt; torch.Tensor:
+        # Apply all the layers sequentially
+        for layer in self.layers:
+            # KEY: only store activations at checkpoints, recompute the rest
+            x = torch.utils.checkpoint.checkpoint(layer, x)
+        return x
+
+model = DeepNetworkCheckpointed(dim=D, num_layers=L).to(cuda_if_available())
+checkpointed_memory = get_max_memory_usage(lambda: model(x).sum().backward())  # 202,900,480
+</code></pre>
+    <div class="callout callout--question">
+      <p class="callout__title">Why didn't the peak memory drop here?</p>
+      <p>In this toy run the checkpointed peak (202.9 MB) is no lower than the baseline (202.1 MB). The activations are only ~2 MB; the peak is dominated by the fp32 weights and their gradients (\(16 \times 1024^2 \times 4\) bytes ≈ 67 MB each). Checkpointing only pays off when activations are the dominant term — large batch × sequence length.</p>
+    </div>
+
+    <p>Can we reduce this even more, especially for deep networks (large \(L\))?</p>
+    <pre><code>Store all layers:   | h1 h2 h3 h4 h5 h6 h7 h8 h9 |
+Store no layers:    |                            |
+Store some layers:  |    h3       h6          h9 |
+</code></pre>
+    <p>How frequently to checkpoint?</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Strategy</th><th>Activation memory</th><th>Recomputation</th></tr></thead>
+        <tbody>
+          <tr><td>Store each layer's activations</td><td>\(O(L)\)</td><td>none</td></tr>
+          <tr><td>Store no activations (recompute from the start for each layer)</td><td>\(O(1)\)</td><td>\(O(L^2)\)</td></tr>
+          <tr><td>Store every \(\sqrt{L}\) layers</td><td>\(O(\sqrt{L})\)</td><td>\(O(L)\)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Summary</h2>
+    <ul>
+      <li>Everything is operations on tensors (parameters, gradients, activations, optimizer states, data)</li>
+      <li>einops: better way to think about tensor operations</li>
+      <li>6 (# data points) (# parameters) FLOPs per training step</li>
+      <li>Arithmetic intensity / roofline analysis: compute-bound or memory-bound?</li>
+      <li>Matrix multiplications are compute-bound, elementwise operations are memory-bound</li>
+      <li>Gradient accumulation, activation checkpointing: reduce memory to use bigger batch sizes</li>
+    </ul>
+
+    <h2>Key terms</h2>
+    <dl class="terms">
+      <dt>FLOPs vs. FLOP/s</dt><dd>Amount of computation vs. hardware speed (computation per second).</dd>
+      <dt>bf16</dt><dd>16-bit format with fp32's 8 exponent bits (same dynamic range) but only 7 fraction bits (worse resolution).</dd>
+      <dt>Mixed precision</dt><dd>bf16 for parameters, activations and gradients; fp32 for optimizer states.</dd>
+      <dt>E4M3 / E5M2</dt><dd>The two fp8 variants: more mantissa (range ±448) vs. more exponent (range ±57344).</dd>
+      <dt>MFU</dt><dd>Model FLOPs utilization = actual FLOP/s ÷ promised FLOP/s; ≥ 0.5 is quite good.</dd>
+      <dt>Arithmetic intensity</dt><dd>FLOPs per byte moved for a workload.</dd>
+      <dt>Accelerator intensity</dt><dd>Peak FLOP/s ÷ memory bandwidth (≈ 295 for H100 bf16) — the kink in the roofline.</dd>
+      <dt>Memory- / compute-bound</dt><dd>Arithmetic intensity below / above accelerator intensity.</dd>
+      <dt>\(6ND\)</dt><dd>Training FLOPs per step: 2 forward + 4 backward, per data point per parameter.</dd>
+      <dt>Gradient accumulation</dt><dd>Sum gradients over micro batches, step every <code>batch_size / micro_batch_size</code> micro steps.</dd>
+      <dt>Activation checkpointing</dt><dd>Keep only some activations in the forward pass, recompute the rest in backward; every \(\sqrt{L}\) layers gives \(O(\sqrt{L})\) memory with \(O(L)\) recompute.</dd>
+    </dl>
+
+
+    <!-- PAGER:START -->
+    <nav class="pager">
+      <a class="prev" href="01-overview-and-tokenization.html"><span class="dir">← Previous</span><span class="ttl">Overview and Tokenization</span></a>
+      <a class="next empty"><span class="dir">End of course</span><span class="ttl">—</span></a>
+    </nav>
+    <!-- PAGER:END -->
+  </main>
+</div>
+</body>
+</html>
