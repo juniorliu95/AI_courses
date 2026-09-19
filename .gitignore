@@ -3,6 +3,9 @@
 courses/**/*.md
 !courses/*/assignments/README.md
 
+# ...and the whole drafts folder, images and all.
+courses/*/markdowns/
+
 # ...except inside a vendored assignment repo, where the .md files are the
 # starter repo's own docs (README, CHANGELOG, handout notes).
 !courses/*/assignments/*/*.md

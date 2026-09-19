@@ -379,6 +379,12 @@ th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--bor
 thead th { font-weight: 660; color: var(--text-muted); border-bottom: 1px solid var(--border-strong); white-space: nowrap; }
 tbody tr:hover { background: var(--bg-subtle); }
 
+/* The one row in a table that is the actual takeaway */
+tbody tr.is-key, tbody tr.is-key:hover { background: var(--accent-soft); }
+tbody tr.is-key td { font-weight: 700; color: var(--accent-text); border-bottom-color: var(--border-strong); }
+tbody tr.is-key td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tbody tr.is-key .katex { color: inherit; }
+
 /* Math */
 .katex-display { overflow-x: auto; overflow-y: hidden; padding: .35em 0; }
 .katex { font-size: 1.04em; }
