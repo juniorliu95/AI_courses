@@ -747,6 +747,7 @@ y = model(x)  # shape (4, 8)
 x = torch.tensor([1., 2, 3])
 w = torch.tensor([1., 1, 1], requires_grad=True)  # Want gradient
 pred_y = x @ w
+# grad = (y-5)*w = w
 loss = 0.5 * (pred_y - 5).pow(2)
 
 # Backward pass: compute gradients
@@ -813,6 +814,55 @@ num_backward_flops = (2 * B * D * D) + (2 * B * D * D)  # 268,435,456
       <li>RMSProp = AdaGrad but with exponential averaging of grad<sup>2</sup></li>
       <li>Adam = RMSProp + momentum</li>
     </ul>
+
+    <details class="toggle">
+      <summary>My notes <span class="name">the four updates, written out</span></summary>
+      <p>All elementwise, per parameter. \(g_t\) is the gradient at step \(t\), \(\eta\) the learning rate, \(\varepsilon\) a small constant to avoid dividing by zero.</p>
+
+      <p><strong>SGD</strong> — the baseline everything else modifies:</p>
+      <p>$$ \theta_t = \theta_{t-1} - \eta\, g_t $$</p>
+
+      <p><strong>Momentum</strong> = SGD + exponential averaging of the gradient. Smooths the <em>direction</em>:</p>
+      <p>$$ m_t = \beta m_{t-1} + (1-\beta) g_t \qquad \theta_t = \theta_{t-1} - \eta\, m_t $$</p>
+
+      <p><strong>AdaGrad</strong> = SGD + accumulated \(g^2\). Scales the <em>step size</em> per coordinate — rarely-updated parameters keep a large step, busy ones get damped:</p>
+      <p>$$ v_t = \sum_{i \le t} g_i^2 \qquad \theta_t = \theta_{t-1} - \eta\, \frac{g_t}{\sqrt{v_t} + \varepsilon} $$</p>
+
+      <p><strong>RMSProp</strong> = AdaGrad with an exponential average instead of a running sum:</p>
+      <p>$$ v_t = \beta v_{t-1} + (1-\beta) g_t^2 \qquad \theta_t = \theta_{t-1} - \eta\, \frac{g_t}{\sqrt{v_t} + \varepsilon} $$</p>
+
+      <p><strong>Adam</strong> = RMSProp + momentum, plus bias correction for the \(m_0 = v_0 = 0\) initialization:</p>
+      <p>$$ m_t = \beta_1 m_{t-1} + (1-\beta_1) g_t \qquad v_t = \beta_2 v_{t-1} + (1-\beta_2) g_t^2 $$</p>
+      <p>$$ \hat{m}_t = \frac{m_t}{1-\beta_1^{\,t}} \qquad \hat{v}_t = \frac{v_t}{1-\beta_2^{\,t}} \qquad \theta_t = \theta_{t-1} - \eta\, \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \varepsilon} $$</p>
+      <p>The hat divides out the phantom \(m_0 = 0\) still sitting in the average with weight \(\beta^t\) — the EMA's weights only sum to \(1-\beta^t\), so dividing by that renormalizes over the gradients actually seen (at \(t=1\) it gives exactly \(\hat{m}_1 = g_1\), as if initialized from the first real gradient).</p>
+
+      <div class="callout callout--tip">
+        <p class="callout__title">They are all the same shape</p>
+        <p>$$ \theta_t = \theta_{t-1} - \eta \cdot \frac{\text{which direction}}{\text{how big a step}} $$</p>
+        <p>The numerator answers "which way do I go" (raw gradient, or a smoothed one); the denominator answers "how far, per coordinate" (constant, or scaled by accumulated gradient magnitude). Each optimizer just picks a different pair.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>optimizer</th><th>numerator</th><th>denominator</th><th>state tensors / param</th></tr></thead>
+          <tbody>
+            <tr><td>SGD</td><td>\(g_t\)</td><td>\(1\)</td><td>0</td></tr>
+            <tr><td>Momentum</td><td>\(m_t\)</td><td>\(1\)</td><td>1</td></tr>
+            <tr><td>AdaGrad</td><td>\(g_t\)</td><td>\(\sqrt{\sum g^2}\)</td><td>1</td></tr>
+            <tr><td>RMSProp</td><td>\(g_t\)</td><td>\(\sqrt{\text{EMA}(g^2)}\)</td><td>1</td></tr>
+            <tr class="is-key"><td>Adam</td><td>\(\hat{m}_t\)</td><td>\(\sqrt{\hat{v}_t}\)</td><td>2</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>That last column is the whole memory story below: AdaGrad and RMSProp keep one extra tensor per parameter, Adam keeps two — which at fp32 is the 4 and 8 bytes/parameter counted in the next section.</p>
+
+      <div class="callout callout--question">
+        <p class="callout__title">Why the progression happens at all</p>
+        <p>AdaGrad's \(v_t\) is a sum, so it only ever grows — the effective learning rate \(\eta/\sqrt{v_t}\) decays monotonically toward zero, and training can stall before it converges. That's fine for convex problems (the original setting) but bad for long deep-learning runs. RMSProp swaps the sum for an exponential average so \(v_t\) can shrink again when gradients get smaller, and the effective step size stops being a one-way ratchet.</p>
+      </div>
+
+      <p>One detail in the code below: it computes <code>sqrt(g2 + 1e-5)</code>, i.e. \(\sqrt{v_t + \varepsilon}\), rather than \(\sqrt{v_t} + \varepsilon\). Both are in common use and behave the same away from zero.</p>
+    </details>
     <p>AdaGrad <a href="https://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf" target="_blank" rel="noopener">[Duchi+ 2011]</a>:</p>
     <pre><code class="language-python">class AdaGrad(torch.optim.Optimizer):
     def __init__(self, params: Iterable[nn.Parameter], lr: float = 0.01):
