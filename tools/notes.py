@@ -71,14 +71,23 @@ def load_courses():
         c = json.loads(read(cfg))
         c["slug"] = slug
         c["dir"] = d
-        c["lectures"] = load_lectures(d)
+        c["lectures"] = load_lectures(d, c.get("pdfs") or [])
         out.append(c)
     out.sort(key=lambda c: (c.get("order", 999), c.get("title", "")))
     return out
 
 
-def load_lectures(d):
-    lects = []
+def load_lectures(d, pdfs=()):
+    # PDF notes are listed in course.json ("pdfs") since they carry no <meta> tags.
+    lects = [{
+        "file": p["file"],
+        "title": p.get("title", p["file"]),
+        "number": p.get("number", ""),
+        "date": p.get("date", ""),
+        "tags": p.get("tags", ""),
+        "summary": p.get("summary", ""),
+        "pdf": True,
+    } for p in pdfs]
     for fn in sorted(os.listdir(d)):
         if not fn.endswith(".html") or fn == "index.html":
             continue
@@ -94,7 +103,7 @@ def load_lectures(d):
             "tags": meta_of(doc, "note:tags"),
             "summary": meta_of(doc, "description"),
         })
-    lects.sort(key=lambda l: (l["file"],))
+    lects.sort(key=lambda l: (l["number"] or "~", l["file"]))
     return lects
 
 
@@ -179,7 +188,8 @@ def build_course_index(c):
     for l in c["lectures"]:
         num = e(l["number"] or "•")
         sub = f'<span class="sub">{e(l["summary"])}</span>' if l["summary"] else ""
-        tag = f'<span class="tag">{e(l["date"])}</span>' if l["date"] else ""
+        tag = " · ".join(x for x in [l["date"], "PDF" if l.get("pdf") else ""] if x)
+        tag = f'<span class="tag">{e(tag)}</span>' if tag else ""
         rows.append(f"""      <li data-searchable="{e(l['title'] + ' ' + l['summary'] + ' ' + l['tags'])}">
         <a href="{e(l['file'])}">
           <span class="num">{num}</span>
@@ -258,6 +268,8 @@ def siblings_html(lectures, current):
 def update_lectures(c):
     ls = c["lectures"]
     for i, l in enumerate(ls):
+        if l.get("pdf"):
+            continue
         path = os.path.join(c["dir"], l["file"])
         doc = read(path)
         doc = replace_region(doc, "PAGER", pager_html(ls[i - 1] if i else None, ls[i + 1] if i + 1 < len(ls) else None))

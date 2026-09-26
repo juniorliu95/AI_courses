@@ -15,5 +15,15 @@
       "label": "Coding assignments →",
       "href": "assignments/"
     }
+  ],
+  "pdfs": [
+    {
+      "file": "lecture_03.pdf",
+      "number": "03",
+      "title": "Architectures and Hyperparameters",
+      "summary": "Everything you didn't want to know about LM architecture and hyperparameters (PDF notes).",
+      "date": "2026-09-21",
+      "tags": "architecture, hyperparameters"
+    }
   ]
 }
