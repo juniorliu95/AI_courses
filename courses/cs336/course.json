@@ -24,6 +24,55 @@
       "summary": "Everything you didn't want to know about LM architecture and hyperparameters (PDF notes).",
       "date": "2026-09-21",
       "tags": "architecture, hyperparameters"
+    },
+    {
+      "file": "lecture_04.pdf",
+      "number": "04",
+      "title": "Attention Alternatives and Mixture of Experts",
+      "summary": "Controlling the cost of attention as context grows: combining local and global attention, more radical attention alternatives, and mixture-of-experts layers.",
+      "tags": "attention, MoE, long context"
+    },
+    {
+      "file": "lecture_05.pdf",
+      "number": "05",
+      "title": "GPUs",
+      "summary": "Making CUDA and GPUs less magic: the execution and memory hierarchy, and what shapes matrix multiplication performance.",
+      "tags": "GPU, CUDA, performance"
+    },
+    {
+      "file": "lecture_08.pdf",
+      "number": "08",
+      "title": "Parallelism Basics",
+      "summary": "Networking for LLM training, the different forms of parallel training, and how they are combined to scale up.",
+      "tags": "parallelism, networking, systems"
+    },
+    {
+      "file": "lecture_09.pdf",
+      "number": "09",
+      "title": "Scaling Laws: Basics",
+      "summary": "Taking scaling seriously: how to choose architecture and hyperparameters for a large run from small ones, rather than cargo-culting existing models.",
+      "tags": "scaling laws, compute-optimal"
+    },
+    {
+      "file": "lecture_11.pdf",
+      "number": "11",
+      "title": "Scaling: Case Study and Details",
+      "summary": "Does Chinchilla's approach to scaling actually work? Best practices for scaling and hyperparameter tuning, with recent models as case studies.",
+      "tags": "scaling laws, hyperparameters"
+    },
+    {
+      "file": "lecture_15.pdf",
+      "number": "15",
+      "title": "After Pretraining: Mid and Post Training",
+      "summary": "Getting from a pretrained model to one that follows instructions: the mid- and post-training stack.",
+      "tags": "post-training, SFT, RLHF"
+    },
+    {
+      "file": "lecture_16.pdf",
+      "number": "16",
+      "title": "Post-training 2: RL from Verifiable Rewards",
+      "summary": "Scaling reinforcement learning past the overoptimization limits of RLHF, into domains with verifiable rewards - the path to o1/R1-style models.",
+      "tags": "RLVR, reasoning, RL"
     }
   ]
 }

@@ -1,0 +1,12 @@
+# Course material is large, opaque and not worth diffing — keep it out of the
+# main object store so clones of the notes stay small. Needs `git lfs install`.
+courses/**/*.pdf  filter=lfs diff=lfs merge=lfs -text
+courses/**/*.png  filter=lfs diff=lfs merge=lfs -text
+courses/**/*.jpg  filter=lfs diff=lfs merge=lfs -text
+courses/**/*.jpeg filter=lfs diff=lfs merge=lfs -text
+courses/**/*.gif  filter=lfs diff=lfs merge=lfs -text
+courses/**/*.webp filter=lfs diff=lfs merge=lfs -text
+
+# Assignment fixtures: checkpoints and tensor snapshots from the starter repos.
+courses/**/*.pt   filter=lfs diff=lfs merge=lfs -text
+courses/**/*.npz  filter=lfs diff=lfs merge=lfs -text
