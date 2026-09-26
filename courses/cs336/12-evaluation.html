@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evaluation · Language Modeling from Scratch</title>
+<meta name="description" content="What it means for a model to be good: perplexity, exam, chat, agentic, reasoning and safety benchmarks, and the questions of realism and validity.">
+<meta name="note:course" content="Language Modeling from Scratch">
+<meta name="note:number" content="12">
+<meta name="note:date" content="">
+<meta name="note:tags" content="evaluation, benchmarks">
+<script>(function(){try{var t=localStorage.getItem('notes-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../../assets/notes.js"></script>
+</head>
+<body>
+<div class="progress"><div class="progress__bar" id="progressBar"></div></div>
+
+<header class="topbar">
+  <button class="iconbtn sidebar-toggle" data-sidebar-toggle aria-label="Toggle contents">☰</button>
+  <a class="topbar__brand" href="../../index.html">AI Notes<span class="dot">.</span></a>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <span class="sep">/</span>
+    <!-- CRUMB:START --><a href="index.html">Language Modeling from Scratch</a><!-- CRUMB:END -->
+    <span class="sep">/</span>
+    <span class="current">Evaluation</span>
+  </nav>
+  <span class="topbar__spacer"></span>
+  <button class="iconbtn" data-theme-toggle aria-label="Toggle theme">☾</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar__label">Course</p>
+    <a class="sidebar__course" href="index.html">Language Modeling from Scratch</a>
+    <p class="sidebar__meta">Lecture 12 · </p>
+
+    <p class="sidebar__label">On this page</p>
+    <nav class="toc" id="toc" aria-label="Table of contents"></nav>
+
+    <!-- SIBLINGS:START -->
+    <hr>
+    <p class="sidebar__label">Lectures</p>
+    <nav class="toc">
+      <ul>
+        <li><a href="01-overview-and-tokenization.html">01 · Overview and Tokenization</a></li>
+        <li><a href="02-resource-accounting.html">02 · Resource Accounting</a></li>
+        <li><a href="lecture_03.pdf">03 · Architectures and Hyperparameters</a></li>
+        <li><a href="lecture_04.pdf">04 · Attention Alternatives and Mixture of Experts</a></li>
+        <li><a href="lecture_05.pdf">05 · GPUs</a></li>
+        <li><a href="06-kernels-benchmarking-profiling-and-triton.html">06 · Kernels: Benchmarking, Profiling and Triton</a></li>
+        <li><a href="07-parallelism.html">07 · Parallelism</a></li>
+        <li><a href="lecture_08.pdf">08 · Parallelism Basics</a></li>
+        <li><a href="lecture_09.pdf">09 · Scaling Laws: Basics</a></li>
+        <li><a href="10-inference.html">10 · Inference</a></li>
+        <li><a href="lecture_11.pdf">11 · Scaling: Case Study and Details</a></li>
+        <li><a href="12-evaluation.html" class="is-active">12 · Evaluation</a></li>
+        <li><a href="13-data-i.html">13 · Data I</a></li>
+        <li><a href="14-data-ii.html">14 · Data II</a></li>
+        <li><a href="lecture_15.pdf">15 · After Pretraining: Mid and Post Training</a></li>
+        <li><a href="lecture_16.pdf">16 · Post-training 2: RL from Verifiable Rewards</a></li>
+        <li><a href="17-multimodal-models.html">17 · Multimodal Models</a></li>
+      </ul>
+    </nav>
+  <!-- SIBLINGS:END -->
+  </aside>
+
+  <main class="content" id="content">
+    <div class="lecture-head">
+      <p class="kicker">Language Modeling from Scratch · Lecture 12</p>
+      <h1>Evaluation</h1>
+      <p class="lead">What it means for a model to be good: perplexity, exam, chat, agentic, reasoning and safety benchmarks, and the questions of realism and validity.</p>
+      <ul class="chips">
+        <li class="chip">evaluation, benchmarks</li>
+        <li><a class="chip chip--accent" href="https://github.com/stanford-cs336/lectures/blob/main/lecture_12.py" target="_blank" rel="noopener">Source ↗</a></li>
+      </ul>
+    </div>
+
+    <ul>
+      <li>So far: we&#x27;ve covered everything for training an LM (architecture, training, systems, scaling).</li>
+      <li>Missing piece: what <strong>data</strong> do you train on?</li>
+      <li>Data shapes model behavior (code? multilingual? DNA?).</li>
+      <li>Before talking about data, need to talk about what behavior we want from a model.</li>
+    </ul>
+
+    <p><strong>Evaluation</strong>: given a model, how &quot;<strong>good</strong>&quot; is it?</p>
+
+    <h2 id="what-is-good">What is good</h2>
+
+    <p>Evaluation might appear to be a mechanical process:</p>
+
+    <ol>
+      <li>Define some prompts</li>
+      <li>Send prompts to a model and get back responses</li>
+      <li>Compute accuracy</li>
+    </ol>
+
+    <p>But actually, evaluation is a deep and important topic...</p>
+
+    <p>...which shapes the development of AI.</p>
+
+    <p><strong>Core challenge</strong>: <span style="color:red">abstract construct</span> → <span style="color:blue">concrete metric</span></p>
+
+    <p>Maybe a model is good if it does well on benchmarks... <a class="src-link" href="https://artificialanalysis.ai/" target="_blank" rel="noopener">Artificial Analysis ↗</a></p>
+
+    <figure>
+      <img src="images/l12/artificial-analysis.png" width="800" alt="Artificial analysis">
+    </figure>
+
+    <p>Maybe a model is good if it does well on benchmarks and is cheap to run...</p>
+
+    <figure>
+      <img src="images/l12/artificial-analysis-cost.png" width="800" alt="Artificial analysis cost">
+    </figure>
+
+    <p>Maybe a model is good if people prefer its responses... <a class="src-link" href="https://arena.ai/leaderboard" target="_blank" rel="noopener">Arena AI (formerly Chatbot Arena) ↗</a></p>
+
+    <figure>
+      <img src="images/l12/lmarena-leaderboard.png" width="400" alt="Lmarena leaderboard">
+    </figure>
+
+    <p>Maybe a model is good if people simply choose to use (and pay for) it... <a class="src-link" href="https://openrouter.ai/rankings" target="_blank" rel="noopener">OpenRouter ↗</a></p>
+
+    <figure>
+      <img src="images/l12/openrouter.png" width="600" alt="Openrouter">
+    </figure>
+
+    <h2 id="perplexity">Perplexity</h2>
+
+    <ul>
+      <li>Recall: that a language model is a probability distribution <strong>p(x)</strong> over sequences of tokens.</li>
+      <li>Perplexity (1/p(D))^(1/|D|) measures whether p assigns high probability to some dataset D.</li>
+      <li>In pre-training, you minimize perplexity on the training set.</li>
+      <li>The obvious thing is to measure perplexity on the test set.</li>
+      <li>This is what people did traditionally in language modeling research.</li>
+    </ul>
+
+    <p>Standard datasets:</p>
+
+    <ul>
+      <li>Penn Treebank (WSJ)</li>
+      <li>WikiText-103 (Wikipedia)</li>
+      <li>One Billion Word Benchmark (from machine translation WMT11 - EuroParl, UN, news)</li>
+    </ul>
+
+    <p>Classic paradigm: in-distribution evaluation: train on train split and evaluate on test split of some dataset.</p>
+
+    <p>Pure CNNs+LSTMs on the One Billion Word Benchmark (perplexity 51.3 → 30.0) <a class="src-link" href="https://arxiv.org/abs/1602.02410" target="_blank" rel="noopener">https://arxiv.org/abs/1602.02410 ↗</a></p>
+
+    <p>GPT-2:</p>
+
+    <ul>
+      <li>Trained on WebText (40GB text, websites linked from Reddit)</li>
+      <li>Zero-shot on standard datasets (<strong>out-of-distribution</strong> evaluation)</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/gpt2-perplexity.png" width="800" alt="Gpt2 perplexity">
+    </figure>
+
+    <ul>
+      <li>Works better on small datasets (PTB) where transfer is helpful, but not larger datasets (1BW)</li>
+    </ul>
+
+    <p>Perplexity is all you need (more faith than science):</p>
+
+    <ul>
+      <li>True distribution is t, model is p.</li>
+      <li>Best possible perplexity is H(t) obtained iff p = t.</li>
+      <li>If p = t, then solve all the tasks: p(solution | problem)</li>
+      <li>So by pushing down on perplexity, we will eventually &quot;reach AGI&quot;.</li>
+    </ul>
+
+    <p>Perplexity is maybe more than you need:</p>
+
+    <ul>
+      <li>Example: <em>Stanford was founded in 1885</em></li>
+      <li>Perplexity penalizes prediction on all tokens, some (e.g., <em>founded</em>) of which might not be relevant</li>
+      <li>Solution: measure conditional perplexity p(response | prompt)^(1/|response|)</li>
+    </ul>
+
+    <p>Some benchmarks are perplexity in disguise:</p>
+
+    <ul>
+      <li>Cloze tasks (fill in the blank): LAMBADA <a class="src-link" href="https://arxiv.org/abs/1606.06031" target="_blank" rel="noopener">https://arxiv.org/abs/1606.06031 ↗</a></li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/lambada.png" width="700" alt="Lambada">
+    </figure>
+
+    <ul>
+      <li>Multiple choice sentence completion: HellaSwag <a class="src-link" href="https://arxiv.org/pdf/1905.07830" target="_blank" rel="noopener">https://arxiv.org/pdf/1905.07830 ↗</a></li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/hellaswag.png" width="500" alt="HellaSwag">
+    </figure>
+
+    <p><strong>Warning</strong> (if you&#x27;re running a perplexity leaderboard):</p>
+
+    <ul>
+      <li>People submit <code>LM</code> and you compute <code>log_prob = LM(test_data)</code></li>
+      <li>You need to trust that the probabilities are valid (sum to 1)</li>
+      <li>For downstream tasks, <code>response = LM(prompt)</code> and compute accuracy on <code>response</code></li>
+    </ul>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Perplexity is still used heavily in language model development (smooth scaling laws)</li>
+      <li>Still need benchmarks that capture real-world situations (for the non-believers)...</li>
+    </ul>
+
+    <h2 id="exam-benchmarks">Exam benchmarks</h2>
+
+    <p>Exams are a useful way to test language models (as with humans):</p>
+
+    <ul>
+      <li>Have control over the subject and difficulty</li>
+      <li>Design to have unambiguous correct answer, easy to grade</li>
+    </ul>
+
+    <p><strong>Massive Multitask Language Understanding (MMLU)</strong></p>
+
+    <pre><code class="language-python">link(mmlu_2021)</code></pre>
+
+    <ul>
+      <li>57 subjects (e.g., math, US history, law, morality), multiple-choice</li>
+      <li>&quot;collected by graduate and undergraduate students from freely available sources online&quot;</li>
+      <li>Despite the name, MMLU is really about testing knowledge, not language understanding</li>
+      <li>Evaluated on GPT-3 using few-shot prompting</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/mmlu.png" width="700" alt="MMLU">
+    </figure>
+
+    <p class="src-link"><a class="src-link" href="https://llm-stats.com/benchmarks/mmlu" target="_blank" rel="noopener">https://llm-stats.com/benchmarks/mmlu ↗</a></p>
+
+    <p class="src-link"><a class="src-link" href="https://crfm.stanford.edu/helm/mmlu/latest/" target="_blank" rel="noopener">HELM MMLU for visualizing predictions ↗</a></p>
+
+    <p><strong>MMLU-Pro</strong> <a class="src-link" href="https://arxiv.org/abs/2406.01574" target="_blank" rel="noopener">https://arxiv.org/abs/2406.01574 ↗</a></p>
+
+    <ul>
+      <li>Removed noisy/trivial questions from MMLU</li>
+      <li>Expanded 4 choices to 10 choices</li>
+      <li>Evaluated using chain of thought (gives model more of a chance)</li>
+      <li>Accuracy of models drop by 16% to 33% (not as saturated)</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/mmlu-pro.png" width="700" alt="MMLU pro">
+    </figure>
+
+    <p class="src-link"><a class="src-link" href="https://llm-stats.com/benchmarks/mmlu-pro" target="_blank" rel="noopener">https://llm-stats.com/benchmarks/mmlu-pro ↗</a></p>
+
+    <p class="src-link"><a class="src-link" href="https://crfm.stanford.edu/helm/capabilities/latest/#/leaderboard/mmlu_pro" target="_blank" rel="noopener">HELM MMLU-Pro for visualizing predictions ↗</a></p>
+
+    <p><strong>Graduate-Level Google-Proof Q&amp;A (GPQA)</strong> <a class="src-link" href="https://arxiv.org/abs/2311.12022" target="_blank" rel="noopener">https://arxiv.org/abs/2311.12022 ↗</a></p>
+
+    <ul>
+      <li>Questions written by 61 PhD contractors from Upwork</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/gpqa.png" width="700" alt="Gpqa">
+    </figure>
+
+    <ul>
+      <li>PhD experts achieve 65% accuracy</li>
+      <li>Non-experts achieve 34% over 30 minutes with access to Google</li>
+      <li>GPT-4 achieves 39% <a class="src-link" href="https://llm-stats.com/benchmarks/gpqa" target="_blank" rel="noopener">https://llm-stats.com/benchmarks/gpqa ↗</a> <a class="src-link" href="https://crfm.stanford.edu/helm/capabilities/latest/#/leaderboard/gpqa" target="_blank" rel="noopener">HELM GPQA for visualizing predictions ↗</a></li>
+    </ul>
+
+    <p><strong>Humanity&#x27;s Last Exam (HLE)</strong> <a class="src-link" href="https://arxiv.org/abs/2501.14249" target="_blank" rel="noopener">https://arxiv.org/abs/2501.14249 ↗</a></p>
+
+    <ul>
+      <li>2500 questions: multimodal, many subjects, multiple-choice + short-answer</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/hle-examples.png" width="700" alt="Hle examples">
+    </figure>
+
+    <ul>
+      <li>Awarded <span>$</span>500K prize pool + co-authorship to question creators</li>
+      <li>Filtered by frontier LLMs, multiple stages of review</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/hle-pipeline.png" width="700" alt="Hle pipeline">
+    </figure>
+
+    <figure>
+      <img src="images/l12/hle-results.png" width="600" alt="Hle results">
+    </figure>
+
+    <p class="src-link"><a class="src-link" href="https://llm-stats.com/benchmarks/hle" target="_blank" rel="noopener">https://llm-stats.com/benchmarks/hle ↗</a></p>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Trend towards harder questions as models improve and saturate existing benchmarks</li>
+      <li>Multiple-choice format can be as difficult as one wants</li>
+      <li>Does not capture real usage (open-ended, doesn&#x27;t necessarily exist correct answer)</li>
+    </ul>
+
+    <h2 id="chat-benchmarks">Chat benchmarks</h2>
+
+    <ul>
+      <li>So far, we&#x27;ve been evaluating on well-defined multiple-choice tasks.</li>
+      <li>Most people don&#x27;t ask multiple-choice exam questions to their AI assistant.</li>
+    </ul>
+
+    <p>Example:</p>
+
+    <p>Prompt: <em>I would like to make a beet salad with goat cheese. What kind of herbs would work well and what would not work well?</em></p>
+
+    <p>Response: *Here’s a breakdown of herbs that work well (and some that don’t) in a beet + goat cheese salad, based on how their flavors interact with the sweet-earthiness of beets and the tangy creaminess of goat cheese...</p>
+
+    <p><strong>Challenge</strong>: how to evaluate an open-ended response?</p>
+
+    <p><strong>Chatbot Arena</strong> <a class="src-link" href="https://arxiv.org/abs/2403.04132" target="_blank" rel="noopener">https://arxiv.org/abs/2403.04132 ↗</a></p>
+
+    <p>Data collection:</p>
+
+    <ul>
+      <li>Random person from the Internet types in prompt</li>
+      <li>They get response from two random (anonymized) models</li>
+      <li>They rate which one is better</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/arena-beets.png" width="700" alt="Arena beets">
+    </figure>
+
+    <p>Compute ELO rankings based on pairwise comparisons:</p>
+
+    <ul>
+      <li>Define model: p(A wins against B) = 1 / (1 + 10^((ELO_B - ELO_A)/400))</li>
+      <li>Fit this model to maximize probability of pairwise comparisons <a class="src-link" href="https://arena.ai/leaderboard" target="_blank" rel="noopener">Arena AI (formerly Chatbot Arena) ↗</a></li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/lmarena-leaderboard.png" width="400" alt="Lmarena leaderboard">
+    </figure>
+
+    <p>Properties:</p>
+
+    <ul>
+      <li>Real-world prompts (free for users, incentives to actually use it)</li>
+      <li>But who are these people? biases? spammers?</li>
+      <li>Binary preference but conflates style and correctness</li>
+      <li>How does the human even assess correctness?  Prone to sycophancy?</li>
+      <li>Feature: don&#x27;t need to feed same prompts to all models (important because human is rating)</li>
+      <li>Dynamic: incorporates new prompts and models over time</li>
+    </ul>
+
+    <p><strong>AlpacaEval</strong> (2023) <a class="src-link" href="https://tatsu-lab.github.io/alpaca_eval/" target="_blank" rel="noopener">leaderboard ↗</a></p>
+
+    <ul>
+      <li>805 instructions from various sources</li>
+      <li>Metric: win rate against baseline model (GPT-4 preview) as judged by GPT-4 preview (potential bias?)</li>
+      <li>Problem: LLM judges favor longer responses, resulted in leaderboard gaming</li>
+      <li>Alpaca Eval 2.0 used regression to debias the metric <a class="src-link" href="https://arxiv.org/pdf/2404.04475" target="_blank" rel="noopener">https://arxiv.org/pdf/2404.04475 ↗</a></li>
+      <li>How do we evaluate the metric?</li>
+      <li>Correlation with Chatbot Arena (humans) is high:</li>
+    </ul>
+
+    <figure>
+      <img src="https://github.com/tatsu-lab/alpaca_eval/raw/main/figures/chat_correlations_no_ae.png" width="500" alt="Chat correlations no ae">
+    </figure>
+
+    <figure>
+      <img src="images/l12/alpacaeval-leaderboard.png" width="400" alt="Alpacaeval leaderboard">
+    </figure>
+
+    <p><strong>WildBench</strong> <a class="src-link" href="https://arxiv.org/pdf/2406.04770" target="_blank" rel="noopener">https://arxiv.org/pdf/2406.04770 ↗</a></p>
+
+    <ul>
+      <li>Sourced 1024 examples from 1M human-chatbot conversations</li>
+      <li>Uses GPT-4 turbo as a judge with a checklist (like CoT for judging) + GPT-4 as a judge</li>
+      <li>Well-correlated with Chatbot Arena (seems to be the de facto sanity check)</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/wildbench.png" width="700" alt="Wildbench">
+    </figure>
+
+    <p class="src-link"><a class="src-link" href="https://crfm.stanford.edu/helm/capabilities/latest/#/leaderboard/wildbench" target="_blank" rel="noopener">HELM WildBench for visualizing predictions ↗</a></p>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Challenge: how to evaluate open-ended responses?</li>
+      <li>Pairwise comparisons between similar responses provide higher signal</li>
+      <li>Beware of biases (both from humans and LLM judges)</li>
+      <li>Checklist/rubric improves reliability (regardless of human or LLM judge)</li>
+    </ul>
+
+    <h2 id="agentic-benchmarks">Agentic benchmarks</h2>
+
+    <p>Previously: evaluate what LMs say (chat)</p>
+
+    <p>Now: evaluate what LMs do (agents)</p>
+
+    <p>Agent = language model + agent scaffold (logic for deciding how to use the LM)</p>
+
+    <p>Consider tasks that require tool use (e.g., running code) and iterating over a period of time</p>
+
+    <p><strong>SWEBench</strong> <a class="src-link" href="https://arxiv.org/abs/2310.06770" target="_blank" rel="noopener">https://arxiv.org/abs/2310.06770 ↗</a></p>
+
+    <ul>
+      <li>2294 tasks across 12 Python repositories</li>
+      <li>Given codebase + issue description, submit a PR</li>
+      <li>Evaluation metric: unit tests</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/swebench.png" width="800" alt="Swebench">
+    </figure>
+
+    <p class="src-link"><a class="src-link" href="https://llm-stats.com/benchmarks/swe-bench-verified" target="_blank" rel="noopener">https://llm-stats.com/benchmarks/swe-bench-verified ↗</a></p>
+
+    <p><strong>TerminalBench</strong> <a class="src-link" href="https://arxiv.org/abs/2601.11868" target="_blank" rel="noopener">https://arxiv.org/abs/2601.11868 ↗</a> <a class="src-link" href="https://www.tbench.ai/" target="_blank" rel="noopener">website ↗</a></p>
+
+    <figure>
+      <img src="images/l12/terminal-bench.png" width="700" alt="Terminal bench">
+    </figure>
+
+    <ul>
+      <li>Computer terminal environments: simple and universal</li>
+      <li>229 tasks crowdsourced from 93 contributors, 89 tasks constitute Terminal-Bench 2.0</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/terminal-bench-human-time.png" width="600" alt="Terminal bench human time">
+    </figure>
+
+    <figure>
+      <img src="images/l12/terminal-bench-results.png" width="600" alt="Terminal bench results">
+    </figure>
+
+    <p class="src-link"><a class="src-link" href="https://llm-stats.com/benchmarks/terminal-bench" target="_blank" rel="noopener">https://llm-stats.com/benchmarks/terminal-bench ↗</a></p>
+
+    <p><strong>CyBench</strong> <a class="src-link" href="https://arxiv.org/abs/2408.08926" target="_blank" rel="noopener">https://arxiv.org/abs/2408.08926 ↗</a></p>
+
+    <figure>
+      <img src="images/l12/cybench.png" width="700" alt="Cybench">
+    </figure>
+
+    <ul>
+      <li>40 Capture the Flag (CTF) tasks</li>
+      <li>Use first-solve time as a measure of difficulty</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/cybench-agent.png" width="700" alt="Cybench agent">
+    </figure>
+
+    <figure>
+      <img src="images/l12/cybench-results.png" width="600" alt="Cybench results">
+    </figure>
+
+    <p class="src-link"><a class="src-link" href="https://llm-stats.com/benchmarks/cybench" target="_blank" rel="noopener">https://llm-stats.com/benchmarks/cybench ↗</a></p>
+
+    <p><strong>MLEBench</strong> <a class="src-link" href="https://arxiv.org/abs/2410.07095" target="_blank" rel="noopener">https://arxiv.org/abs/2410.07095 ↗</a></p>
+
+    <ul>
+      <li>75 Kaggle competitions (require training models, processing data, etc.)</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/mlebench.png" width="800" alt="Mlebench">
+    </figure>
+
+    <figure>
+      <img src="images/l12/mlebench-results.png" width="700" alt="Mlebench results">
+    </figure>
+
+    <p>Agent scaffolds <a class="src-link" href="https://www.philschmid.de/agents-2.0-deep-agents" target="_blank" rel="noopener">post ↗</a></p>
+
+    <figure>
+      <img src="https://www.philschmid.de/static/blog/agents-2.0-deep-agents/overview.png" width="400" alt="Overview">
+    </figure>
+
+    <ul>
+      <li>Explicit planning: keep a todo list that gets checked off</li>
+      <li>Hierarchical delegation: agents calling other sub-agents (clean context)</li>
+      <li>Persistent memory: read/write files</li>
+      <li>Extreme context engineering: explicit more instructions on process</li>
+    </ul>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Agents dramatically enhance the capability surface of language models</li>
+      <li>Agent scaffolds are very important</li>
+      <li>Evaluating agents = evaluating agent scaffold + language model</li>
+    </ul>
+
+    <h2 id="pure-reasoning-benchmarks">Pure reasoning benchmarks</h2>
+
+    <ul>
+      <li>All of the tasks so far require linguistic and world knowledge.</li>
+      <li>Can we isolate <strong>reasoning</strong> from knowledge?</li>
+      <li>Arguably, reasoning captures a more pure form of intelligence (isn&#x27;t just about memorizing facts).</li>
+    </ul>
+
+    <p><strong>ARC-AGI</strong> <a class="src-link" href="https://arcprize.org/arc-agi" target="_blank" rel="noopener">website ↗</a></p>
+
+    <ul>
+      <li>100\% solvable by humans, but challenging for AI</li>
+      <li>Each task is unique, so memorization doesn&#x27;t help.</li>
+      <li>ARC-AGI-1 (2019): first iteration</li>
+    </ul>
+
+    <figure>
+      <img src="https://arcprize.org/media/images/arc-task-grids.jpg" width="800" alt="ARC task grids">
+    </figure>
+
+    <ul>
+      <li>ARC-AGI-2 (March 2025): more multi-step reasoning</li>
+    </ul>
+
+    <figure>
+      <img src="https://arcprize.org/media/images/blog/arc-agi-2-unsolved-1.png" width="800" alt="ARC agi 2 unsolved 1">
+    </figure>
+
+    <figure>
+      <img src="images/l12/arc-agi-results.png" width="700" alt="ARC agi results">
+    </figure>
+
+    <ul>
+      <li>Pretrained language models didn&#x27;t move the needle</li>
+      <li>Reasoning models (o1, o3) started making things take off</li>
+      <li>ARC-AGI-3 (March 2026): interactive environments <a class="src-link" href="https://arcprize.org/media/ARC_AGI_3_Technical_Report.pdf" target="_blank" rel="noopener">post ↗</a></li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/arc-agi-3.png" width="300" alt="ARC agi 3">
+    </figure>
+
+    <figure>
+      <img src="images/l12/arc-agi-3-results.png" width="500" alt="ARC agi 3 results">
+    </figure>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Goal is to disentangle reasoning from knowledge (difficult to do!)</li>
+      <li>Constrained to human reasoning (not superhuman reasoning)</li>
+      <li>Clearly exposes gaps in current models</li>
+    </ul>
+
+    <h2 id="safety-benchmarks">Safety benchmarks</h2>
+
+    <figure>
+      <img src="https://www.team-bhp.com/forum/attachments/road-safety/2173645d1625144681-will-crash-test-rating-change-if-higher-variant-chosen-images-30.jpeg" width="400" alt="2173645d1625144681 will crash test rating change if higher variant chosen images 30">
+    </figure>
+
+    <p>What does safety mean for AI?</p>
+
+    <p><strong>HarmBench</strong> <a class="src-link" href="https://arxiv.org/abs/2402.04249" target="_blank" rel="noopener">https://arxiv.org/abs/2402.04249 ↗</a></p>
+
+    <ul>
+      <li>Based on 510 harmful behaviors that violate laws or norms <a class="src-link" href="https://crfm.stanford.edu/helm/safety/latest/#/leaderboard/harm_bench" target="_blank" rel="noopener">HarmBench on HELM ↗</a> <a class="src-link" href="https://crfm.stanford.edu/helm/safety/latest/#/runs/harm_bench:model=anthropic_claude-3-7-sonnet-20250219?instancesPage=4" target="_blank" rel="noopener">Example of safety failure ↗</a></li>
+    </ul>
+
+    <p><strong>AIR-Bench</strong> <a class="src-link" href="https://arxiv.org/abs/2407.17436" target="_blank" rel="noopener">https://arxiv.org/abs/2407.17436 ↗</a></p>
+
+    <ul>
+      <li>Based on regulatory frameworks and company policies</li>
+      <li>Taxonomized into 314 risk categories, 5694 prompts</li>
+    </ul>
+
+    <figure>
+      <img src="https://crfm.stanford.edu/helm/assets/air-overview-DpBbyagA.png" width="800" alt="Air overview DpBbyagA">
+    </figure>
+
+    <p class="src-link"><a class="src-link" href="https://crfm.stanford.edu/helm/air-bench/latest/#/leaderboard" target="_blank" rel="noopener">HELM AIR-Bench ↗</a></p>
+
+    <p>Jailbreaking:</p>
+
+    <ul>
+      <li>Language models are trained to refuse harmful instructions</li>
+      <li>Greedy Coordinate Gradient (GCG) automatically optimizes prompts to bypass safety <a class="src-link" href="https://arxiv.org/pdf/2307.15043" target="_blank" rel="noopener">https://arxiv.org/pdf/2307.15043 ↗</a></li>
+      <li>Transfers from open-weight models (Llama) to closed models (GPT-4)</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/gcg-examples.png" width="800" alt="Gcg examples">
+    </figure>
+
+    <p>What is safety?</p>
+
+    <ul>
+      <li>Many aspects of safety are strongly contextual (politics, law, social norms - which vary across countries)</li>
+      <li>Many risks are quite varied (hallucinations, sycophancy, abetting crimes, inequality, losing critical thinking)</li>
+    </ul>
+
+    <p><strong>Dual-use</strong>: capable cybersecurity agents (Mythos) can be used to hack into a system or to do penetration testing</p>
+
+    <h2 id="realism">Realism</h2>
+
+    <p><strong>Ecological validity</strong>: how well does an evaluation capture real-world use?</p>
+
+    <ul>
+      <li>Exam benchmarks (e.g., GPQA) are far away from real-world use.</li>
+      <li>Chatbot Arena prompts are from real people, but distribution is uncontrolled.</li>
+    </ul>
+
+    <p><strong>GDPVal</strong> (OpenAI) <a class="src-link" href="https://arxiv.org/pdf/2510.04374" target="_blank" rel="noopener">https://arxiv.org/pdf/2510.04374 ↗</a></p>
+
+    <ul>
+      <li>44 occupations from top 9 sectors according to US GDP</li>
+      <li>Tasks come from professionals with ~14 years of experience</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/gdpval.png" width="700" alt="Gdpval">
+    </figure>
+
+    <p><strong>MedHELM</strong> <a class="src-link" href="https://arxiv.org/abs/2505.23802" target="_blank" rel="noopener">https://arxiv.org/abs/2505.23802 ↗</a></p>
+
+    <ul>
+      <li>Previous medical benchmarks were based on standardized exams</li>
+      <li>121 clinical tasks sourced from 29 clinicians, mixture of private and public datasets</li>
+    </ul>
+
+    <figure>
+      <img src="https://crfm.stanford.edu/helm/assets/medhelm-overview-CND0EIsy.png" width="700" alt="Medhelm overview CND0EIsy">
+    </figure>
+
+    <p class="src-link"><a class="src-link" href="https://crfm.stanford.edu/helm/medhelm/latest/#/leaderboard" target="_blank" rel="noopener">MedHELM ↗</a></p>
+
+    <p><strong>Clio</strong> (Anthropic) <a class="src-link" href="https://arxiv.org/abs/2412.13678" target="_blank" rel="noopener">https://arxiv.org/abs/2412.13678 ↗</a></p>
+
+    <ul>
+      <li>Use language models to analyze real user data</li>
+      <li>Share general patterns of what people are asking</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/clio-table4.png" width="700" alt="Clio table4">
+    </figure>
+
+    <p>Unfortunately, realism and privacy are sometimes at odds with each other.</p>
+
+    <h2 id="validity">Validity</h2>
+
+    <p>How do we know our evaluations are valid?</p>
+
+    <h3 id="train-test-overlap">Train-test overlap</h3>
+
+    <ul>
+      <li>Machine learning 101: don&#x27;t train on your test set</li>
+      <li>Pre-foundation models (ImageNet, SQuAD): well-defined train-test splits</li>
+      <li>Today: train on the Internet and don&#x27;t tell people about your data</li>
+    </ul>
+
+    <p>Route 1: try to infer train-test overlap from model</p>
+
+    <ul>
+      <li>Exploit exchangeability of data points <a class="src-link" href="https://arxiv.org/pdf/2310.17623" target="_blank" rel="noopener">https://arxiv.org/pdf/2310.17623 ↗</a></li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/contamination-exchangeability.png" width="500" alt="Contamination exchangeability">
+    </figure>
+
+    <p>Route 2: encourage reporting norms (e.g., people report confidence intervals)</p>
+
+    <ul>
+      <li>Model providers should report train-test overlap <a class="src-link" href="https://arxiv.org/abs/2410.08385" target="_blank" rel="noopener">https://arxiv.org/abs/2410.08385 ↗</a></li>
+    </ul>
+
+    <p>Route 3: use fresh evals</p>
+
+    <ul>
+      <li>LiveCodeBench, UncheatableEval: scrape new webpages</li>
+      <li>Timestamps aren&#x27;t always safe due to copying either</li>
+    </ul>
+
+    <p>Route 4: use private evals</p>
+
+    <ul>
+      <li>Companies use internal code bases that aren&#x27;t on the Internet</li>
+      <li>Use your personal writings</li>
+      <li>Easiest for perplexity</li>
+    </ul>
+
+    <h3 id="dataset-quality">Dataset quality</h3>
+
+    <ul>
+      <li>Fixed up SWE-Bench to produce SWE-Bench Verified <a class="src-link" href="https://openai.com/index/introducing-swe-bench-verified/" target="_blank" rel="noopener">post ↗</a></li>
+      <li>Create Platinum versions of benchmarks <a class="src-link" href="https://arxiv.org/abs/2502.03461" target="_blank" rel="noopener">https://arxiv.org/abs/2502.03461 ↗</a></li>
+    </ul>
+
+    <figure>
+      <img src="https://pbs.twimg.com/media/GjICXQlWkAAYnDS?format=jpg&amp;name=4096x4096" width="700" alt="GjICXQlWkAAYnDS?format=jpg&amp;name=4096x4096">
+    </figure>
+
+    <figure>
+      <img src="https://pbs.twimg.com/media/GjICcGQXYAAM4o1?format=jpg&amp;name=4096x4096" width="800" alt="GjICcGQXYAAM4o1?format=jpg&amp;name=4096x4096">
+    </figure>
+
+    <ul>
+      <li>Problems with agentic benchmarks: insufficient test cases, trivial agent can solve task <a class="src-link" href="https://arxiv.org/abs/2507.02825" target="_blank" rel="noopener">https://arxiv.org/abs/2507.02825 ↗</a></li>
+      <li>Docent: use LLM to inspect agent traces to detect problems <a class="src-link" href="https://transluce.org/introducing-docent" target="_blank" rel="noopener">post ↗</a></li>
+    </ul>
+
+    <h2 id="how-to-think-about-evaluation">How to think about evaluation</h2>
+
+    <h3 id="what-s-the-point-of-evaluation">What&#x27;s the point of evaluation?</h3>
+
+    <p>There is no one true evaluation; it depends on what question you&#x27;re trying to answer.</p>
+
+    <ol>
+      <li>User or company wants to make a purchase decision (model A or model B) for their use case (e.g., customer service chatbots).</li>
+      <li>Researchers want to measure the raw capabilities of a model (e.g., intelligence).</li>
+      <li>We want to understand the benefits + harms of a model (for business and policy reasons).</li>
+      <li>Model developers want to get feedback to improve the model.</li>
+    </ol>
+
+    <h3 id="what-are-we-evaluating">What are we evaluating?</h3>
+
+    <ul>
+      <li>Pre-foundation models, we evaluated <strong>methods</strong> (standardized train-test splits).</li>
+      <li>Today, we&#x27;re (mostly) evaluating <strong>models/systems</strong> (anything goes).</li>
+    </ul>
+
+    <p>There are some exceptions...</p>
+
+    <ul>
+      <li>nanogpt speedrun: fixed data, compute time to get to a particular validation loss</li>
+    </ul>
+
+    <figure>
+      <img src="images/l12/karpathy-nanogpt-speedrun.png" width="600" alt="Karpathy nanogpt speedrun">
+    </figure>
+
+    <p class="src-link"><a class="src-link" href="https://x.com/karpathy/status/1846790537262571739" target="_blank" rel="noopener">post ↗</a></p>
+
+    <p>Evaluating methods encourage algorithmic innovation from researchers.</p>
+
+    <p>Evaluating models/systems is useful for downstream users.</p>
+
+    <p>Either way, we need to define the rules of the game!</p>
+
+    <p>Takeaways:</p>
+
+    <ul>
+      <li>There is no one true evaluation; choose the evaluation depending on what you&#x27;re trying to measure.</li>
+      <li>Clearly state the rules of the game (methods versus models versus agents).</li>
+      <li>Considerations: difficulty, realism, validity.</li>
+    </ul>
+
+    <!-- PAGER:START -->
+    <nav class="pager">
+      <a class="prev" href="lecture_11.pdf"><span class="dir">← Previous</span><span class="ttl">Scaling: Case Study and Details</span></a>
+      <a class="next" href="13-data-i.html"><span class="dir">Next →</span><span class="ttl">Data I</span></a>
+    </nav>
+    <!-- PAGER:END -->
+  </main>
+</div>
+</body>
+</html>
