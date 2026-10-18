@@ -255,6 +255,11 @@ assert x == 0  # Underflow!
     <pre><code class="language-python">x = torch.tensor([1e-8], dtype=torch.bfloat16)  # tensor([1.0012e-08], dtype=torch.bfloat16)
 assert x != 0  # No underflow!
 </code></pre>
+    <details class="toggle">
+      <summary>My notes <span class="name">why bf16 keeps 8 exponent bits</span></summary>
+      <p>The two fields buy different things: the <strong>exponent sets the range</strong> (how large or small a value can get), while the <strong>fraction sets the precision</strong> (how finely values are spaced at a given scale). More fraction bits means smaller rounding error.</p>
+      <p>bf16 gives up fraction bits (7, vs fp32's 23) to keep all 8 exponent bits because, in deep learning training (especially for large models like LLMs), values overflowing or underflowing is far more damaging than coarse rounding.</p>
+    </details>
 
     <h4>Mixed precision</h4>
     <p>Implications on training:</p>
