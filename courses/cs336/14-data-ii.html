@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data II · Language Modeling from Scratch</title>
+<meta name="description" content="Turning raw dumps into training data: transformation, filtering, deduplication, data mixing, and post-training data.">
+<meta name="note:course" content="Language Modeling from Scratch">
+<meta name="note:number" content="14">
+<meta name="note:date" content="">
+<meta name="note:tags" content="data, filtering, deduplication">
+<script>(function(){try{var t=localStorage.getItem('notes-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../../assets/notes.js"></script>
+</head>
+<body>
+<div class="progress"><div class="progress__bar" id="progressBar"></div></div>
+
+<header class="topbar">
+  <button class="iconbtn sidebar-toggle" data-sidebar-toggle aria-label="Toggle contents">☰</button>
+  <a class="topbar__brand" href="../../index.html">AI Notes<span class="dot">.</span></a>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <span class="sep">/</span>
+    <!-- CRUMB:START --><a href="index.html">Language Modeling from Scratch</a><!-- CRUMB:END -->
+    <span class="sep">/</span>
+    <span class="current">Data II</span>
+  </nav>
+  <span class="topbar__spacer"></span>
+  <button class="iconbtn" data-theme-toggle aria-label="Toggle theme">☾</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar__label">Course</p>
+    <a class="sidebar__course" href="index.html">Language Modeling from Scratch</a>
+    <p class="sidebar__meta">Lecture 14 · </p>
+
+    <p class="sidebar__label">On this page</p>
+    <nav class="toc" id="toc" aria-label="Table of contents"></nav>
+
+    <!-- SIBLINGS:START -->
+    <hr>
+    <p class="sidebar__label">Lectures</p>
+    <nav class="toc">
+      <ul>
+        <li><a href="01-overview-and-tokenization.html">01 · Overview and Tokenization</a></li>
+        <li><a href="02-resource-accounting.html">02 · Resource Accounting</a></li>
+        <li><a href="lecture_03.pdf">03 · Architectures and Hyperparameters</a></li>
+        <li><a href="lecture_04.pdf">04 · Attention Alternatives and Mixture of Experts</a></li>
+        <li><a href="lecture_05.pdf">05 · GPUs</a></li>
+        <li><a href="06-kernels-benchmarking-profiling-and-triton.html">06 · Kernels: Benchmarking, Profiling and Triton</a></li>
+        <li><a href="07-parallelism.html">07 · Parallelism</a></li>
+        <li><a href="lecture_08.pdf">08 · Parallelism Basics</a></li>
+        <li><a href="lecture_09.pdf">09 · Scaling Laws: Basics</a></li>
+        <li><a href="10-inference.html">10 · Inference</a></li>
+        <li><a href="lecture_11.pdf">11 · Scaling: Case Study and Details</a></li>
+        <li><a href="12-evaluation.html">12 · Evaluation</a></li>
+        <li><a href="13-data-i.html">13 · Data I</a></li>
+        <li><a href="14-data-ii.html" class="is-active">14 · Data II</a></li>
+        <li><a href="lecture_15.pdf">15 · After Pretraining: Mid and Post Training</a></li>
+        <li><a href="lecture_16.pdf">16 · Post-training 2: RL from Verifiable Rewards</a></li>
+        <li><a href="17-multimodal-models.html">17 · Multimodal Models</a></li>
+      </ul>
+    </nav>
+  <!-- SIBLINGS:END -->
+  </aside>
+
+  <main class="content" id="content">
+    <div class="lecture-head">
+      <p class="kicker">Language Modeling from Scratch · Lecture 14</p>
+      <h1>Data II</h1>
+      <p class="lead">Turning raw dumps into training data: transformation, filtering, deduplication, data mixing, and post-training data.</p>
+      <ul class="chips">
+        <li class="chip">data, filtering, deduplication</li>
+        <li><a class="chip chip--accent" href="https://github.com/stanford-cs336/lectures/blob/main/lecture_14.py" target="_blank" rel="noopener">Source ↗</a></li>
+      </ul>
+    </div>
+
+    <p>Last lecture:</p>
+
+    <ul>
+      <li>Live service (e.g., GitHub) → dump/crawl (e.g., GitHub Archive) → processed data (e.g., The Stack)</li>
+      <li>Considerations: terms of service, copyright (licenses or fair use)</li>
+    </ul>
+
+    <p>This lecture:</p>
+
+    <ul>
+      <li>Data pipeline: transformation, filtering, deduplication, mixing</li>
+      <li>Mid-training + SFT: synthetic data</li>
+    </ul>
+
+    <h2 id="transformation">Transformation</h2>
+
+    <p>Raw data does not come as text.</p>
+
+    <p>It is HTML, PDF (arxiv), or directories (code repositories).</p>
+
+    <p>HTML to text (main one):</p>
+
+    <ul>
+      <li>Remove boilerplate (e.g., navigation, ads) and extract content</li>
+      <li>What about images, tables, etc.?</li>
+      <li>Inherently lossy (need to linearize)</li>
+      <li>Tools (rule-based): trafilatura, resiliparse, jusText, lynx, etc.</li>
+      <li>Accuracy matters:</li>
+    </ul>
+
+    <pre><code class="language-python">link(dclm_2024)</code></pre>
+
+    <figure>
+      <img src="images/l14/dclm-wet.png" width="300" alt="Dclm wet">
+    </figure>
+
+    <p>FinePDFs <a class="src-link" href="https://huggingface.co/spaces/HuggingFaceFW/FinePDFsBlog" target="_blank" rel="noopener">post ↗</a></p>
+
+    <figure>
+      <img src="https://huggingfacefw-finepdfsblog.hf.space/_astro/pdf-description.Cb49jXc6_Z17eX4E.webp" width="600" alt="Pdf description.Cb49jXc6 Z17eX4E">
+    </figure>
+
+    <ul>
+      <li>Source: Common Crawl</li>
+      <li>Recrawl truncated PDFs (since they are big)</li>
+      <li>OCR (RolmOCR) using a VLM or Docling (make these run fast)</li>
+      <li>Lots of cleanup and filtering</li>
+      <li>A lot of layout information is missing</li>
+    </ul>
+
+    <h2 id="filtering">Filtering</h2>
+
+    <p>Algorithmic building block:</p>
+
+    <ul>
+      <li>Given some <strong>target data</strong> T and lots of <strong>raw data</strong> R, find subset T&#x27; of R similar to T.</li>
+    </ul>
+
+    <figure>
+      <img src="images/l14/raw-target-schema.png" width="600" alt="Raw target schema">
+    </figure>
+
+    <p>Applications:</p>
+
+    <ul>
+      <li>Language identification (English versus rest)</li>
+      <li>Quality filtering (high quality versus low quality)</li>
+      <li>Toxicity filtering (non-toxic versus toxic)</li>
+    </ul>
+
+    <p>Desiderata for filtering algorithm:</p>
+
+    <ul>
+      <li>Generalize from the target data (want T and T&#x27; to be different)</li>
+      <li>Extremely fast (have to run it on R, which is huge)</li>
+    </ul>
+
+    <p>Survey paper on data selection <a class="src-link" href="https://arxiv.org/abs/2402.16827" target="_blank" rel="noopener">https://arxiv.org/abs/2402.16827 ↗</a></p>
+
+    <p>General framework: Given target T and raw R, find subset of R similar to T</p>
+
+    <ol>
+      <li>Estimate some model based on R and T and derive a scoring function</li>
+      <li>Keep examples in R based on their score</li>
+    </ol>
+
+    <p>Types of classifiers:</p>
+
+    <ul>
+      <li>Generative model of T (KenLM): score(x) = p_T(x)</li>
+      <li>Simple classifier (fastText): score(x) = p(T | x)</li>
+    </ul>
+
+    <p>To use: keep examples x with score(x) &gt;= threshold (stochastically)</p>
+
+    <p>Model-based filtering?</p>
+
+    <ul>
+      <li>Some deliberately do not use model-based filtering (C4, Gopher, RefinedWeb, FineWeb, Dolma)</li>
+      <li>Some use model-based filtering (GPT-3, LLaMA, DCLM) [becoming the norm]</li>
+    </ul>
+
+    <p>Language identification:</p>
+
+    <ul>
+      <li>Goal: find text of a specific language (e.g., English)</li>
+      <li>fastText language identification <a class="src-link" href="https://fasttext.cc/docs/en/language-identification.html" target="_blank" rel="noopener">article ↗</a></li>
+      <li>Off-the-shelf classifier</li>
+      <li>Supports 176 languages</li>
+      <li>Trained on multilingual sites: Wikipedia, Tatoeba (translation site) and SETimes (Southeast European news)</li>
+      <li>Dolma keeps pages with p(English) &gt;= 0.5</li>
+    </ul>
+
+    <pre><code class="language-python">link(dolma_2024)</code></pre>
+
+    <p>OpenMathText <a class="src-link" href="https://arxiv.org/pdf/2310.06786" target="_blank" rel="noopener">https://arxiv.org/pdf/2310.06786 ↗</a></p>
+
+    <ul>
+      <li>Goal: curate large corpus of mathematical text from CommonCrawl</li>
+      <li>Use rules to filter (e.g., contains latex commands)</li>
+      <li>KenLM trained on ProofPile, keep if perplexity &lt; 15000</li>
+      <li>Trained fastText classifier to predict mathematical writing, threshold is 0.17 if math, 0.8 if no math</li>
+      <li>Result: produced 14.7B tokens, used to train 1.4B models that do better than models trained on 20x data</li>
+    </ul>
+
+    <p>GPT-3 <a class="src-link" href="https://arxiv.org/pdf/2005.14165" target="_blank" rel="noopener">https://arxiv.org/pdf/2005.14165 ↗</a></p>
+
+    <ul>
+      <li>Positives: samples from {Wikipedia, WebText2, Books1, Books2}</li>
+      <li>Negatives: samples from CommonCrawl</li>
+    </ul>
+
+    <p>Train linear classifier based on word features <a class="src-link" href="https://spark.apache.org/docs/latest/ml-features#tokenizer" target="_blank" rel="noopener">article ↗</a></p>
+
+    <p>Keep documents stochastically based on score</p>
+
+    <pre><code class="language-python">def keep_document(score: float) -&gt; bool:
+    return np.random.pareto(9) &gt; 1 - score</code></pre>
+
+    <p>LLaMA/RedPajama <a class="src-link" href="https://arxiv.org/pdf/2302.13971" target="_blank" rel="noopener">https://arxiv.org/pdf/2302.13971 ↗</a></p>
+
+    <ul>
+      <li>Positives: samples from pages <strong>referenced</strong> by Wikipedia</li>
+      <li>Negatives: samples from CommonCrawl</li>
+      <li>Keep documents that are classified positive</li>
+    </ul>
+
+    <p>phi-1 <a class="src-link" href="https://arxiv.org/pdf/2306.11644" target="_blank" rel="noopener">https://arxiv.org/pdf/2306.11644 ↗</a></p>
+
+    <ul>
+      <li>Philosophy: really high quality data (textbooks) to train a small model (1.5B)</li>
+      <li>Includes synthetic data from GPT 3.5 (later: GPT-4) and filtered data</li>
+    </ul>
+
+    <pre><code class="language-python">R = &quot;Python subset of the Stack&quot;   # Raw data
+prompt = &quot;determine its educational value for a student whose goal is to learn basic coding concepts&quot;
+T = &quot;Use GPT-4 with this prompt to classify 100K subset of R to get positive examples&quot;</code></pre>
+
+    <ul>
+      <li>Train random forest classifier on T using output embedding from pretrained codegen model</li>
+      <li>Select data from R that is classified positive by the classifier</li>
+    </ul>
+
+    <p>Result on <a href="https://huggingface.co/datasets/openai_humaneval" target="_blank" rel="noopener">HumanEval</a>:</p>
+
+    <ul>
+      <li>Train 1.3B LM on Python subset of The Stack (performance: 12.19% after 96K steps)</li>
+      <li>Train 1.3B LM on new filtered subset (performance: 17.68% after 36K steps) - better!</li>
+    </ul>
+
+    <p>Toxicity filtering in Dolma</p>
+
+    <pre><code class="language-python">link(dolma_2024)</code></pre>
+
+    <ul>
+      <li>Dataset: Jigsaw Toxic Comments dataset (2018) <a class="src-link" href="https://www.kaggle.com/datasets/julian3833/jigsaw-toxic-comment-classification-challenge" target="_blank" rel="noopener">dataset ↗</a></li>
+      <li>Project goal: help people have better discussions online <a class="src-link" href="https://www.kaggle.com/competitions/jigsaw-toxic-comment-classification-challenge/discussion/46064" target="_blank" rel="noopener">article ↗</a></li>
+      <li>Data: comments on Wikipedia talk page annotated with {toxic, severe_toxic, obscene, threat, insult, identity_hate}</li>
+    </ul>
+
+    <p>Scale-dependent effects of filtering:</p>
+
+    <ul>
+      <li>No single optimal threshold for filtering</li>
+      <li>If training for longer, want more (lower quality) data</li>
+      <li>If training for shorter, want less (higher quality) data</li>
+    </ul>
+
+    <figure>
+      <img src="images/l14/data-filtering-scale.png" width="800" alt="Data filtering scale">
+    </figure>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Filtering is critical for building a good model</li>
+      <li>Recipe: define target data (what good looks like), extrapolate to raw data</li>
+    </ul>
+
+    <h2 id="deduplication">Deduplication</h2>
+
+    <p>Two types of duplicates:</p>
+
+    <ul>
+      <li>Exact duplicates (mirror sites, GitHub forks) <a class="src-link" href="https://www.gutenberg.org/MIRRORS.ALL" target="_blank" rel="noopener">Gutenberg mirrors ↗</a></li>
+      <li>Near duplicates: same text differing by a few tokens</li>
+    </ul>
+
+    <p>Examples of near duplicates:</p>
+
+    <ul>
+      <li>Terms of service and licenses <a class="src-link" href="https://opensource.org/license/mit" target="_blank" rel="noopener">MIT license ↗</a></li>
+      <li>Formulaic writing (copy/pasted or generated from a template)</li>
+    </ul>
+
+    <figure>
+      <img src="https://d3i71xaburhd42.cloudfront.net/4566c0d22ebf3c31180066ab23b6c445aeec78d5/5-Table1-1.png" width="600" alt="5 Table1 1">
+    </figure>
+
+    <ul>
+      <li>Minor formatting differences in copy/pasting</li>
+    </ul>
+
+    <p>Product description repeated 61,036 times in C4</p>
+
+    <p>&#x27;“by combining fantastic ideas, interesting arrangements, and follow the current trends in the field of that make you more inspired and give artistic touches. We’d be honored if you can apply some or all of these design in your wedding.  believe me, brilliant ideas would be perfect if it can be applied in real and make the people around you amazed! <a class="src-link" href="https://www.amazon.co.uk/suryagede-100-Graffiti-Gas-Mask/dp/B07CRHT3RG" target="_blank" rel="noopener">example page ↗</a></p>
+
+    <p>Deduplication training data makes language models better <a class="src-link" href="https://arxiv.org/pdf/2107.06499" target="_blank" rel="noopener">https://arxiv.org/pdf/2107.06499 ↗</a></p>
+
+    <ul>
+      <li>Train more efficiently (because have fewer tokens)</li>
+      <li>Avoid memorization (can mitigate copyright, privacy concerns)</li>
+    </ul>
+
+    <p>Design space:</p>
+
+    <ol>
+      <li>What is an item (sentence, paragraph, document)?</li>
+      <li>How to match (exact match, existence of common subitem, fraction of common subitems)?</li>
+      <li>What action to take (remove all, remove all but one)?</li>
+    </ol>
+
+    <p>Key challenge:</p>
+
+    <ul>
+      <li>Deduplication is fundamentally about comparing items to other items</li>
+      <li>Need linear time algorithms to scale</li>
+    </ul>
+
+    <h3 id="hash-functions">Hash functions</h3>
+
+    <ul>
+      <li>Hash function h maps item to a hash value (integer or string)</li>
+      <li>Hash value much smaller than item</li>
+      <li>Hash collision: h(x) = h(y) for x ≠ y</li>
+    </ul>
+
+    <p>Tradeoff between efficiency and collision resistance <a class="src-link" href="https://softwareengineering.stackexchange.com/questions/49550/which-hashing-algorithm-is-best-for-uniqueness-and-speed" target="_blank" rel="noopener">article ↗</a></p>
+
+    <ul>
+      <li>Cryptographic hash functions (SHA-256): collision resistant, slow (used in bitcoin)</li>
+      <li>DJB2, MurmurHash, CityHash: not collision resistant, fast (used for hash tables)</li>
+    </ul>
+
+    <p>We will use MurmurHash:</p>
+
+    <pre><code class="language-python">h = mmh3.hash(&quot;hello&quot;)  # @inspect h</code></pre>
+
+    <h3 id="exact-deduplication">Exact deduplication</h3>
+
+    <p><strong>Simple example</strong></p>
+
+    <ol>
+      <li>Item: string</li>
+      <li>How to match: exact match</li>
+      <li>Action: remove all but one</li>
+    </ol>
+
+    <pre><code class="language-python"># Original items
+items = [&quot;Hello!&quot;, &quot;hello&quot;, &quot;hello there&quot;, &quot;hello&quot;, &quot;hi&quot;, &quot;bye&quot;]  # @inspect items
+
+# Compute hash -&gt; list of items with that hash
+hash_items = itertools.groupby(sorted(items, key=mmh3.hash), key=mmh3.hash)
+
+# Keep one item from each group
+deduped_items = [next(group) for h, group in hash_items]  # @inspect deduped_items</code></pre>
+
+    <ul>
+      <li>Pro: simple, clear semantics, high precision</li>
+      <li>Con: does not deduplicate near duplicates</li>
+      <li>This code is written in a MapReduce way, can easily parallelize and scale</li>
+    </ul>
+
+    <p><strong>C4</strong> <a class="src-link" href="https://arxiv.org/pdf/1910.10683v4" target="_blank" rel="noopener">https://arxiv.org/pdf/1910.10683v4 ↗</a></p>
+
+    <ol>
+      <li>Item: 3-sentence spans</li>
+      <li>How to match: use exact match</li>
+      <li>Action: remove all but one</li>
+    </ol>
+
+    <p>Warning: when a 3-sentence span is removed from the middle of a document, the resulting document might not be coherent</p>
+
+    <h3 id="jaccard-minhash">Jaccard minhash</h3>
+
+    <p>Let&#x27;s now look at approximate set membership.</p>
+
+    <p>First we need a similarity measure.</p>
+
+    <h4 id="jaccard-similarity">Jaccard similarity</h4>
+
+    <p>Definition: Jaccard(A, B) = |A intersect B| / |A union B|</p>
+
+    <pre><code class="language-python">A = {&quot;1&quot;, &quot;2&quot;, &quot;3&quot;, &quot;4&quot;}
+B = {&quot;1&quot;, &quot;2&quot;, &quot;3&quot;, &quot;5&quot;}
+
+def compute_jaccard(A, B):
+    intersection = len(A &amp; B)  # @inspect intersection
+    union = len(A | B)  # @inspect union
+    return intersection / union
+jaccard = compute_jaccard(A, B)  # @inspect jaccard</code></pre>
+
+    <p>Definition: two documents are <strong>near duplicates</strong> if their Jaccard similarity &gt;= threshold</p>
+
+    <p>Algorithmic challenge: find near duplicates in linear time</p>
+
+    <h4 id="minhash">MinHash</h4>
+
+    <p>MinHash: a random hash function h so that Pr[h(A) = h(B)] = Jaccard(A, B)</p>
+
+    <p>Normally, you want different items to hash to different hashes</p>
+
+    <p>...but here, you want collision probability to depend on similarity</p>
+
+    <pre><code class="language-python">def minhash(S: set[str], seed: int):
+    return min(mmh3.hash(x, seed) for x in S)</code></pre>
+
+    <p>Characteristic matrix representation:</p>
+
+    <pre><code>item | A | B
+1    | 1 | 1
+2    | 1 | 1
+3    | 1 | 1
+4    | 1 | 0
+5    | 0 | 1</code></pre>
+
+    <p>Random hash function induces a permutation over items</p>
+
+    <p>Look at which item is first in A and which item is first in B.</p>
+
+    <p>Each item has the same probability as being first (min)</p>
+
+    <ul>
+      <li>If 1, 2, 3 is first, then first in A = first in B.</li>
+      <li>If 4, 5 is first, then first in A ≠ first in B.</li>
+    </ul>
+
+    <pre><code class="language-python"># Verify MinHash approximates Jaccard as advertised
+n = 100  # Generate this many random hash functions
+matches = [minhash(A, seed) == minhash(B, seed) for seed in range(n)]  # @stepover
+estimated_jaccard = len([m for m in matches if m]) / len(matches)  # @inspect estimated_jaccard
+assert abs(estimated_jaccard - jaccard) &lt; 0.01</code></pre>
+
+    <p>Now we can hash our items, but a collision doesn&#x27;t tell us Jaccard(A, B) &gt; threshold.</p>
+
+    <h3 id="locality-sensitive-hashing">Locality sensitive hashing</h3>
+
+    <p>Locality sensitive hashing (LSH) <a class="src-link" href="http://infolab.stanford.edu/~ullman/mmds/ch3n.pdf" target="_blank" rel="noopener">book chapter ↗</a></p>
+
+    <p>Suppose we hash examples with just one MinHash function</p>
+
+    <p>P[A and B collide] = Jaccard(A, B)</p>
+
+    <p>On average, more similar items will collide, but very stochastic...</p>
+
+    <p>Goal: have A and B collide if Jaccard(A, B) &gt; threshold</p>
+
+    <p>We have to somehow sharpen the probabilities...</p>
+
+    <p>Solution: use n hash functions</p>
+
+    <p>Break up into b bands of r hash functions each (n = b * r)</p>
+
+    <pre><code class="language-python">n = 12      # Number of hash functions
+b = 3       # Number of bands
+r = 4       # Number of hash functions per band</code></pre>
+
+    <p>Hash functions:</p>
+
+    <pre><code>h1 h2 h3 h4  |  h5 h6 h7 h8  |  h9 h10 h11 h12</code></pre>
+
+    <p>Key: A and B collide if for <em>some</em> band, <em>all</em> its hash functions return same value</p>
+
+    <p>As we will see, the and-or structure of the bands sharpens the threshold</p>
+
+    <p>Given Jaccard(A, B), what is the probability that A and B collide?</p>
+
+    <pre><code class="language-python">def get_prob_collision(sim, b, r):  # @inspect sim @inspect b @inspect r
+    prob_match = sim ** r                        # Probability that a fixed band matches  @inspect prob_match
+    prob_collision = 1 - (1 - prob_match) ** b   # Probability that some band matches  @inspect prob_collision
+    return prob_collision</code></pre>
+
+    <p><strong>Example</strong></p>
+
+    <pre><code class="language-python">prob_collision = get_prob_collision(sim=0.8, b=5, r=10)  # @inspect prob_collision</code></pre>
+
+    <figure>
+      <img src="https://cdn.sanity.io/images/vr8gru94/production/b470799575b8e77911bacb8500977afef06d6c85-1280x720.png" width="600" alt="B470799575b8e77911bacb8500977afef06d6c85 1280x720">
+    </figure>
+
+    <pre><code class="language-python">sims = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 0.98]
+probs = {sim: get_prob_collision(sim=sim, b=10, r=10) for sim in sims}  # @inspect probs @stepover</code></pre>
+
+    <p>Increasing r sharpens the threshold and moves the curve to the right (harder to match)</p>
+
+    <pre><code class="language-python">probs = {sim: get_prob_collision(sim=sim, b=10, r=20) for sim in sims}  # @inspect probs @stepover</code></pre>
+
+    <p>Increasing b moves the curve to the left (easier to match)</p>
+
+    <pre><code class="language-python">probs = {sim: get_prob_collision(sim=sim, b=20, r=20) for sim in sims}  # @inspect probs @stepover</code></pre>
+
+    <figure>
+      <img src="https://cdn.sanity.io/images/vr8gru94/production/aace49fa240778e8ecf6e85ad08a2de7f5385566-1280x720.png" width="600" alt="Aace49fa240778e8ecf6e85ad08a2de7f5385566 1280x720">
+    </figure>
+
+    <p>Example setting <a class="src-link" href="https://arxiv.org/pdf/2107.06499" target="_blank" rel="noopener">https://arxiv.org/pdf/2107.06499 ↗</a></p>
+
+    <p>: n = 9000, b = 20, r = 450</p>
+
+    <pre><code class="language-python">b = 20
+r = 450</code></pre>
+
+    <p>What is the threshold (where the phase transition happens)?</p>
+
+    <pre><code class="language-python">threshold = (1 / b) ** (1 / r)  # @inspect threshold</code></pre>
+
+    <p>Probability that a fixed band matches:</p>
+
+    <pre><code class="language-python">prob_match = (1 / b)  # @inspect prob_match</code></pre>
+
+    <p>Probability that A and B collide is a constant (≈ 1-1/e):</p>
+
+    <pre><code class="language-python">prob_collision = 1 - (1 - 1 / b) ** b  #  @inspect prob_collision</code></pre>
+
+    <h2 id="data-mixing">Data mixing</h2>
+
+    <p>Recall that language models are trained on multiple data sources.</p>
+
+    <p>Datasets in Marin: <a class="src-link" href="https://huggingface.co/spaces/marin-community/token-count-viewer" target="_blank" rel="noopener">token viewer ↗</a></p>
+
+    <figure>
+      <img src="images/l14/marin-token-viewer.png" width="800" alt="Marin token viewer">
+    </figure>
+
+    <p>The Pile</p>
+
+    <pre><code class="language-python">link(the_pile_2020)</code></pre>
+
+    <figure>
+      <img src="https://stanford-cs324.github.io/winter2022/lectures/images/the-pile.png" width="600" alt="The pile">
+    </figure>
+
+    <p>Key question: what distribution over the data sources should we use?</p>
+
+    <p>Example:</p>
+
+    <pre><code class="language-python">sources = {&quot;Wikipedia&quot;, &quot;CC&quot;, &quot;GitHub&quot;}
+p = {&quot;Wikipedia&quot;: 0.3, &quot;CC&quot;: 0.5, &quot;GitHub&quot;: 0.2}  # One possible data mixture</code></pre>
+
+    <p>Baselines:</p>
+
+    <ul>
+      <li>Vibes: set p(s) manually based on intuition (quite common)</li>
+      <li>Uniform sampling: sample uniformly (p(s) ∝ 1)</li>
+      <li>Proportional mixing: sample proportional to the number of tokens in a source (p(s) ∝ num_tokens(s))</li>
+    </ul>
+
+    <p>Intuition: should upweight higher quality sources</p>
+
+    <p>However...</p>
+
+    <ol>
+      <li>We want to ensure diversity (e.g., across incomparable sources: literature, code, papers)</li>
+      <li>Each source is finite, so if put too much weight on a small source, then need to epoch over it</li>
+    </ol>
+
+    <p>This last point is important and a bit subtle.</p>
+
+    <p>Example:</p>
+
+    <pre><code class="language-python">source_token_counts = {
+    &quot;low&quot;: trillion(10),  # 10T tokens (abundant) @stepover
+    &quot;high&quot;: billion(10),  # 10B tokens (scarce) @stepover
+}
+p = {&quot;low&quot;: 0.5, &quot;high&quot;: 0.5}  # Naive data mixture
+train_tokens = trillion(1)  # Train for 1T tokens @stepover
+low_num_epochs = (p[&quot;low&quot;] * train_tokens) / source_token_counts[&quot;low&quot;]  # @inspect low_num_epochs
+high_num_epochs = (p[&quot;high&quot;] * train_tokens) / source_token_counts[&quot;high&quot;]  # @inspect high_num_epochs</code></pre>
+
+    <details class="toggle">
+      <summary>Source <span class="name">trillion()</span></summary>
+      <pre><code class="language-python">def trillion(x):
+    return x * 10**12</code></pre>
+    </details>
+
+    <details class="toggle">
+      <summary>Source <span class="name">billion()</span></summary>
+      <pre><code class="language-python">def billion(x):
+    return x * 10**9</code></pre>
+    </details>
+
+    <p>50x epochs on high quality data...can lead to overfitting!</p>
+
+    <p>UniMax <a class="src-link" href="https://arxiv.org/abs/2304.09151" target="_blank" rel="noopener">https://arxiv.org/abs/2304.09151 ↗</a></p>
+
+    <ul>
+      <li>Setting: balancing different languages for multilingual models</li>
+      <li>Previous work: between uniform and proportional mixing (p(s) ∝ num_tokens(s)^α for α in [0, 1])</li>
+      <li>Idea: sample sources uniformly but with a hard <strong>cap</strong> C on number of epochs for any source</li>
+      <li>Specifically, p(s) * num_training_tokens ≤ C for all sources s</li>
+    </ul>
+
+    <p>Regression-based mixing <a class="src-link" href="https://arxiv.org/abs/2407.01492" target="_blank" rel="noopener">https://arxiv.org/abs/2407.01492 ↗</a> <a class="src-link" href="https://arxiv.org/pdf/2602.12237" target="_blank" rel="noopener">https://arxiv.org/pdf/2602.12237 ↗</a></p>
+
+    <figure>
+      <img src="images/l14/regmix.png" width="700" alt="Regmix">
+    </figure>
+
+    <ul>
+      <li>Define distribution over mixtures <code>p</code> (e.g., Dirichlet)</li>
+      <li>Define regression method (e.g., linear, gradient boosted trees)</li>
+      <li>Define target based on downstream evals (careful not to overfit!)</li>
+      <li>Discrepancy between small and large scale (tradeoff cost and accuracy)</li>
+    </ul>
+
+    <figure>
+      <img src="images/l14/data-mixing-methods.png" width="700" alt="Data mixing methods">
+    </figure>
+
+    <p>Hope 1: regression model is accurate at minimizer 🙏</p>
+
+    <p>Hope 2: optimal data mixtures transfer from small to large scale 🙏</p>
+
+    <p>Hold on. There&#x27;s at least one scale-dependent effect:</p>
+
+    <pre><code class="language-python">source_token_counts = {
+    &quot;low&quot;: trillion(10),  # 10T tokens (abundant) @stepover
+    &quot;high&quot;: billion(10),  # 10B tokens (scarce) @stepover
+}</code></pre>
+
+    <ul>
+      <li>If train small models on low token counts:</li>
+    </ul>
+
+    <pre><code class="language-python">p = {&quot;low&quot;: 0.1, &quot;high&quot;: 0.9}  # More mass on high quality data</code></pre>
+
+    <ul>
+      <li>But if train large model on this mixture, we will epoch a ton on high quality data and overfit!</li>
+    </ul>
+
+    <p>Simulated epoching <a class="src-link" href="https://arxiv.org/pdf/2501.11747" target="_blank" rel="noopener">https://arxiv.org/pdf/2501.11747 ↗</a></p>
+
+    <ul>
+      <li>General idea: make small scale look like large scale (general theme of this course)</li>
+      <li>Instantiation: downsample all sources proportionally</li>
+    </ul>
+
+    <pre><code class="language-python">small_run_tokens = billion(10)  # @stepover
+large_run_tokens = trillion(1)  # @stepover
+ratio = small_run_tokens / large_run_tokens  # @inspect ratio
+downsampled_source_token_counts = {s: count * ratio for s, count in source_token_counts.items()}  # @inspect downsampled_source_token_counts</code></pre>
+
+    <ul>
+      <li>In this downsampled mixture, models that epoch too much won&#x27;t look good.</li>
+      <li>So the optimum will be more balanced.</li>
+    </ul>
+
+    <pre><code class="language-python">p = {&quot;low&quot;: 0.7, &quot;high&quot;: 0.3}  # More mass on high quality data</code></pre>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Problem: how to weight different data sources (e.g., Wikipedia, general, code)</li>
+      <li>Regression-based mixing: estimate mixture → loss at small scale, optimize (analogous to scaling laws)</li>
+      <li>Important consideration: epoching and overfitting (solution: cap or simulated)</li>
+    </ul>
+
+    <h2 id="post-training-data">Post training data</h2>
+
+    <p>Recipe:</p>
+
+    <ol>
+      <li>Define a set of environments</li>
+      <li>Define a set of tasks / prompts</li>
+      <li>Collect responses from a strong model (teacher)</li>
+    </ol>
+
+    <p>OpenThoughts <a class="src-link" href="https://arxiv.org/abs/2506.04178" target="_blank" rel="noopener">https://arxiv.org/abs/2506.04178 ↗</a></p>
+
+    <ul>
+      <li>1.2M examples using QwQ-32B as a teacher</li>
+      <li>Questions come from 27 human and synthetic sources (e.g., StackExchange, NuminaMath, Chemistry)</li>
+    </ul>
+
+    <figure>
+      <img src="images/l14/openthoughts-sources.png" width="500" alt="Openthoughts sources">
+    </figure>
+
+    <ul>
+      <li>Sampling multiple (16) responses per prompt is helpful</li>
+      <li>Better models aren&#x27;t necessarily better teachers: QwQ-32B is a better teacher than DeepSeek-R1</li>
+      <li>Answer filtering wasn&#x27;t helpful</li>
+      <li>Smaller high quality sources (e.g., OpenMath-2-Math) is better than large diverse sources</li>
+    </ul>
+
+    <figure>
+      <img src="images/l14/openthoughts-pipeline.png" width="600" alt="Openthoughts pipeline">
+    </figure>
+
+    <p>SWE-smith <a class="src-link" href="https://arxiv.org/abs/2504.21798" target="_blank" rel="noopener">https://arxiv.org/abs/2504.21798 ↗</a></p>
+
+    <figure>
+      <img src="images/l14/swe-smith.png" width="500" alt="Swe smith">
+    </figure>
+
+    <ul>
+      <li>Given a repository, use LM to generate tasks (introduce bugs with LM)</li>
+      <li>128 GitHub repositories yields 50K tasks</li>
+    </ul>
+
+    <p>SWE-Zero <a class="src-link" href="https://arxiv.org/abs/2604.01496" target="_blank" rel="noopener">https://arxiv.org/abs/2604.01496 ↗</a></p>
+
+    <ul>
+      <li>SWE tasks have heavy dependencies (unlike math or coding contests)</li>
+      <li>Setting up thousands of Docker images is an infrastructural nightmare</li>
+      <li>Observation: strong models can solve many tasks without execution feedback</li>
+    </ul>
+
+    <figure>
+      <img src="images/l14/swezero-noexec.png" width="600" alt="Swezero noexec">
+    </figure>
+
+    <p>Key: strong models have internal &quot;world model&quot; of code semantics</p>
+
+    <ul>
+      <li>SWE-Zero: 300K agent trajectories that don&#x27;t require repository-specific execution</li>
+      <li>150K GitHub PRs</li>
+      <li>OpenHands scaffold, remove future git commits to prevent &quot;git hacking&quot; by agent</li>
+    </ul>
+
+    <figure>
+      <img src="images/l14/swezero-prompt.png" width="600" alt="Swezero prompt">
+    </figure>
+
+    <ul>
+      <li>Distilled from Qwen3-Coder-480B + filtering (try to execute anyway)</li>
+      <li>SWE-Hero: 13K agent trajectories that do require execution feedback</li>
+    </ul>
+
+    <figure>
+      <img src="images/l14/swezero-results.png" width="700" alt="Swezero results">
+    </figure>
+
+    <p>SWE-rebench <a class="src-link" href="https://arxiv.org/pdf/2505.20411" target="_blank" rel="noopener">https://arxiv.org/pdf/2505.20411 ↗</a></p>
+
+    <ul>
+      <li>21K interactive Python SWE tasks from 3.4K GitHub repositories</li>
+      <li>450K PRs from GitHub and GitHub Archive</li>
+      <li>Used Qwen 2.5-72B-Instruct to install dependencies and assess PR quality</li>
+    </ul>
+
+    <figure>
+      <img src="images/l14/swe-rebench.png" width="600" alt="Swe rebench">
+    </figure>
+
+    <p>SWE-ZERO-12M-trajectories <a class="src-link" href="https://huggingface.co/datasets/AlienKevin/SWE-ZERO-12M-trajectories" target="_blank" rel="noopener">data ↗</a></p>
+
+    <ul>
+      <li>Scale SWE-Zero up to 12M agent trajectories</li>
+      <li>Used the SWE-rebench-v2 tasks (32K executable tasks + 120K nonexecutable tasks)</li>
+      <li>Ran mini-coder-1.7b (very small model, 50.4 pass@100), mini-swe-agent scaffold</li>
+      <li><a href="https://huggingface.co/datasets/AlienKevin/SWE-ZERO-12M-trajectories/viewer/default/train?row=5&amp;conversation-viewer=0" target="_blank" rel="noopener">Example</a></li>
+    </ul>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Generating prompts: fully-synthetic, semi-synthetic (real environment + synthetic tasks), real (GitHub PRs)</li>
+      <li>Responses: from capable models (that are also good teachers)</li>
+      <li>Code environments are painful</li>
+      <li>Lots of filtering and other details</li>
+    </ul>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Filtering: train classifier (language id, quality, toxicity) for what good looks like</li>
+      <li>Deduplication: hashing scales to large datasets for fuzzy matching</li>
+      <li>Mixing: try mixtures at small scale, extrapolate to optimal mixture and large scale</li>
+      <li>Applications: language identification, quality filtering, toxicity filtering</li>
+      <li>Post-training data: looks like evaluations, use of synthetic data</li>
+      <li>A lot of data work is domain-specific, looking at examples, etc.</li>
+    </ul>
+
+    <!-- PAGER:START -->
+    <nav class="pager">
+      <a class="prev" href="13-data-i.html"><span class="dir">← Previous</span><span class="ttl">Data I</span></a>
+      <a class="next" href="lecture_15.pdf"><span class="dir">Next →</span><span class="ttl">After Pretraining: Mid and Post Training</span></a>
+    </nav>
+    <!-- PAGER:END -->
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parallelism · Language Modeling from Scratch</title>
+<meta name="description" content="Parallelism across GPUs: collective operations, the hardware underneath, torch.distributed, and data, tensor and pipeline parallelism.">
+<meta name="note:course" content="Language Modeling from Scratch">
+<meta name="note:number" content="07">
+<meta name="note:date" content="">
+<meta name="note:tags" content="parallelism, distributed, collectives">
+<script>(function(){try{var t=localStorage.getItem('notes-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../../assets/notes.js"></script>
+</head>
+<body>
+<div class="progress"><div class="progress__bar" id="progressBar"></div></div>
+
+<header class="topbar">
+  <button class="iconbtn sidebar-toggle" data-sidebar-toggle aria-label="Toggle contents">☰</button>
+  <a class="topbar__brand" href="../../index.html">AI Notes<span class="dot">.</span></a>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <span class="sep">/</span>
+    <!-- CRUMB:START --><a href="index.html">Language Modeling from Scratch</a><!-- CRUMB:END -->
+    <span class="sep">/</span>
+    <span class="current">Parallelism</span>
+  </nav>
+  <span class="topbar__spacer"></span>
+  <button class="iconbtn" data-theme-toggle aria-label="Toggle theme">☾</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar__label">Course</p>
+    <a class="sidebar__course" href="index.html">Language Modeling from Scratch</a>
+    <p class="sidebar__meta">Lecture 07 · </p>
+
+    <p class="sidebar__label">On this page</p>
+    <nav class="toc" id="toc" aria-label="Table of contents"></nav>
+
+    <!-- SIBLINGS:START -->
+    <hr>
+    <p class="sidebar__label">Lectures</p>
+    <nav class="toc">
+      <ul>
+        <li><a href="01-overview-and-tokenization.html">01 · Overview and Tokenization</a></li>
+        <li><a href="02-resource-accounting.html">02 · Resource Accounting</a></li>
+        <li><a href="lecture_03.pdf">03 · Architectures and Hyperparameters</a></li>
+        <li><a href="lecture_04.pdf">04 · Attention Alternatives and Mixture of Experts</a></li>
+        <li><a href="lecture_05.pdf">05 · GPUs</a></li>
+        <li><a href="06-kernels-benchmarking-profiling-and-triton.html">06 · Kernels: Benchmarking, Profiling and Triton</a></li>
+        <li><a href="07-parallelism.html" class="is-active">07 · Parallelism</a></li>
+        <li><a href="lecture_08.pdf">08 · Parallelism Basics</a></li>
+        <li><a href="lecture_09.pdf">09 · Scaling Laws: Basics</a></li>
+        <li><a href="10-inference.html">10 · Inference</a></li>
+        <li><a href="lecture_11.pdf">11 · Scaling: Case Study and Details</a></li>
+        <li><a href="12-evaluation.html">12 · Evaluation</a></li>
+        <li><a href="13-data-i.html">13 · Data I</a></li>
+        <li><a href="14-data-ii.html">14 · Data II</a></li>
+        <li><a href="lecture_15.pdf">15 · After Pretraining: Mid and Post Training</a></li>
+        <li><a href="lecture_16.pdf">16 · Post-training 2: RL from Verifiable Rewards</a></li>
+        <li><a href="17-multimodal-models.html">17 · Multimodal Models</a></li>
+      </ul>
+    </nav>
+  <!-- SIBLINGS:END -->
+  </aside>
+
+  <main class="content" id="content">
+    <div class="lecture-head">
+      <p class="kicker">Language Modeling from Scratch · Lecture 07</p>
+      <h1>Parallelism</h1>
+      <p class="lead">Parallelism across GPUs: collective operations, the hardware underneath, torch.distributed, and data, tensor and pipeline parallelism.</p>
+      <ul class="chips">
+        <li class="chip">parallelism, distributed, collectives</li>
+        <li><a class="chip chip--accent" href="https://github.com/stanford-cs336/lectures/blob/main/lecture_07.py" target="_blank" rel="noopener">Source ↗</a></li>
+      </ul>
+    </div>
+
+    <p>Last week: parallelism within a single GPU</p>
+
+    <p>This week: parallelism across multiple GPUs</p>
+
+    <figure>
+      <img src="images/l07/gpu-node-overview.png" width="700" alt="GPU node overview">
+    </figure>
+
+    <p>In both cases, <strong>compute</strong> (arithmetic logic units) is far from inputs/outputs (<strong>data</strong>).</p>
+
+    <p>Unifying theme: orchestrate computation to avoid data transfer bottlenecks</p>
+
+    <p>Generalized hierarchy:</p>
+
+    <ul>
+      <li>Single node, single GPU: L1 cache / shared memory (fastest)</li>
+      <li>Single node, single GPU: HBM</li>
+      <li>Single node, multi-GPU: NVLink/NVSwitch</li>
+      <li>Multi-node, multi-GPU: Infiniband/Ethernet (slowest)</li>
+    </ul>
+
+    <p>Last week: reduce memory accesses via fusion/tiling</p>
+
+    <p>This week: reduce communication across GPUs/nodes via replication/sharding</p>
+
+    <p>Why do multi-GPU?</p>
+
+    <ol>
+      <li>Your parameters (optimizer state + gradients + activations) don&#x27;t fit on a single GPU.</li>
+      <li>You want to use more GPUs (more FLOPs) to train faster. <a class="src-link" href="https://github.com/stanford-cs336/lectures/blob/main/var/traces/lecture_07_stdout.txt" target="_blank" rel="noopener">stdout for this lecture ↗</a></li>
+    </ol>
+
+    <h2 id="part-1-building-blocks-of-distributed-communication-computation">Part 1: building blocks of distributed communication/computation</h2>
+
+    <h2 id="collective-operations">Collective operations</h2>
+
+    <p><strong>Collective operations</strong> are the conceptual primitives used for distributed programming <a class="src-link" href="https://en.wikipedia.org/wiki/Collective_operation" target="_blank" rel="noopener">article ↗</a></p>
+
+    <ul>
+      <li>These are classic in the parallel programming literature from the 1980s.</li>
+      <li><em>Collective</em> means that you specify a general communication pattern across many devices.</li>
+      <li>This can be better/faster than managing point-to-point communication yourself.</li>
+    </ul>
+
+    <p><strong>Setup</strong>:</p>
+
+    <figure>
+      <img src="images/l07/ranks.png" width="500" alt="Ranks">
+    </figure>
+
+    <ul>
+      <li><strong>Rank</strong>: a particular device/GPU (e.g., 0, 1, 2, 3)</li>
+      <li><strong>World size</strong>: total number of devices (e.g., 4)</li>
+    </ul>
+
+    <p>Operations:</p>
+
+    <ul>
+      <li>Broadcast, scatter, gather, reduce (foundations)</li>
+      <li>All-gather, reduce-scatter, all-reduce (workhorse)</li>
+      <li>All-to-all (for MoEs)</li>
+    </ul>
+
+    <p><strong>Broadcast</strong>: copy from rank 0 to all ranks</p>
+
+    <pre><code class="language-python"># Input
+rank0 = tensor([0., 1, 2, 3])
+
+# Output
+rank0 = tensor([0., 1, 2, 3])
+rank1 = tensor([0., 1, 2, 3])
+rank2 = tensor([0., 1, 2, 3])
+rank3 = tensor([0., 1, 2, 3])</code></pre>
+
+    <p>Minor use case: rank 0 loads initial checkpoint and broadcasts to all ranks</p>
+
+    <p><strong>Scatter</strong> tensor on rank 0 to all ranks</p>
+
+    <pre><code class="language-python"># Input
+rank0 = tensor([0., 1, 2, 3])
+
+# Output
+rank0 = tensor([0.])
+rank1 = tensor([1.])
+rank2 = tensor([2.])
+rank3 = tensor([3.])</code></pre>
+
+    <p>Note: stepping stone to understanding reduce-scatter</p>
+
+    <p><strong>Gather</strong> pieces from all ranks to rank 0 (opposite of scatter)</p>
+
+    <pre><code class="language-python"># Input
+rank0 = tensor([0.])
+rank1 = tensor([1.])
+rank2 = tensor([2.])
+rank3 = tensor([3.])
+
+# Output
+rank0 = tensor([0., 1, 2, 3])</code></pre>
+
+    <p>Note: stepping stone to understanding all-gather</p>
+
+    <p><strong>Reduce</strong> pieces from all ranks to rank 0, applying some operation (e.g., sum, min, max)</p>
+
+    <pre><code class="language-python"># Input
+rank0 = tensor([0.])
+rank1 = tensor([1.])
+rank2 = tensor([2.])
+rank3 = tensor([3.])
+
+# Output
+rank0 = tensor([6.])  # Sum of all ranks (0 + 1 + 2 + 3)</code></pre>
+
+    <p>Note: stepping stone to understanding all-reduce</p>
+
+    <p><strong>All-gather</strong>: perform gather to all ranks, not just rank 0</p>
+
+    <pre><code class="language-python"># Input
+rank0 = tensor([0.])
+rank1 = tensor([1.])
+rank2 = tensor([2.])
+rank3 = tensor([3.])
+
+# Output
+rank0 = tensor([0., 1, 2, 3])
+rank1 = tensor([0., 1, 2, 3])
+rank2 = tensor([0., 1, 2, 3])
+rank3 = tensor([0., 1, 2, 3])</code></pre>
+
+    <p>Use case: each rank holds parameter shard, gather to get full parameters for forward pass</p>
+
+    <p><strong>Reduce-scatter</strong>: perform reduce on each dimension, scatter results</p>
+
+    <pre><code class="language-python"># Input
+rank0 = tensor([0., 1, 2, 3])
+rank1 = tensor([1., 2, 3, 4])
+rank2 = tensor([2., 3, 4, 5])
+rank3 = tensor([3., 4, 5, 6])
+
+# Output
+rank0 = tensor([6.])  # Sum along dim 0 (0 + 1 + 2 + 3)
+rank1 = tensor([10.]) # Sum along dim 1 (1 + 2 + 3 + 4)
+rank2 = tensor([14.]) # Sum along dim 2 (2 + 3 + 4 + 5)
+rank3 = tensor([18.]) # Sum along dim 3 (3 + 4 + 5 + 6)</code></pre>
+
+    <p>Use case: after backward pass, sum gradients from different data shards, but distribute storage</p>
+
+    <p><strong>All-reduce</strong> = reduce-scatter + all-gather</p>
+
+    <pre><code class="language-python"># Input
+rank0 = tensor([0., 1, 2, 3])
+rank1 = tensor([1., 2, 3, 4])
+rank2 = tensor([2., 3, 4, 5])
+rank3 = tensor([3., 4, 5, 6])
+
+# Output
+rank0 = tensor([6., 10, 14, 18])
+rank1 = tensor([6., 10, 14, 18])
+rank2 = tensor([6., 10, 14, 18])
+rank3 = tensor([6., 10, 14, 18])</code></pre>
+
+    <p>Use case: after backward pass, sum gradients from different data shards, but replicate full parameters</p>
+
+    <p>Breaking all-reduce into reduce-scatter + all-gather allows for flexibility (e.g., ZeRO/FSDP)</p>
+
+    <p><strong>All-to-all</strong>: each rank sends each other rank some tensor (most general)</p>
+
+    <pre><code class="language-python"># Input
+rank0 = tensor([0., 1, 2, 3])      # send  0 to rank 0,  1 to rank 1,  2 to rank 2,  3 to rank 3
+rank1 = tensor([4., 5, 6, 7])      # send  4 to rank 0,  5 to rank 1,  6 to rank 2,  7 to rank 3
+rank2 = tensor([8., 9, 10, 11])    # send  8 to rank 0,  9 to rank 1, 10 to rank 2, 11 to rank 3
+rank3 = tensor([12., 13, 14, 15])  # send 12 to rank 0, 13 to rank 1, 14 to rank 2, 15 to rank 3
+
+# Output
+rank0 = tensor([0, 4, 8, 12])
+rank1 = tensor([1, 5, 9, 13])
+rank2 = tensor([2, 6, 10, 14])
+rank3 = tensor([3, 7, 11, 15])</code></pre>
+
+    <p>Notes:</p>
+
+    <ul>
+      <li>Useful for MoEs: each rank has split of data and subset of experts; need to route data to experts</li>
+      <li>For balanced splits, all-to-all looks like transpose</li>
+      <li>Also handles unbalanced splits (but want splits to be as balanced as possible)</li>
+    </ul>
+
+    <p>Way to remember the terminology:</p>
+
+    <ul>
+      <li>Reduce: performs some associative/commutative operation (sum, min, max)</li>
+      <li>Scatter is inverse of gather</li>
+      <li>All: means destination is all devices</li>
+    </ul>
+
+    <h2 id="hardware">Hardware</h2>
+
+    <p>Classic (in the home):</p>
+
+    <figure>
+      <img src="https://media.springernature.com/lw685/springer-static/image/art%3A10.1186%2Fs42774-021-00098-3/MediaObjects/42774_2021_98_Fig1_HTML.png?as=webp" width="500" alt="42774 2021 98 Fig1 HTML.png?as=webp">
+    </figure>
+
+    <ul>
+      <li>GPUs on same node communicate via a PCI(e) bus (v7.0, 16 lanes =&gt; 242 GB/s) <a class="src-link" href="https://en.wikipedia.org/wiki/PCI_Express" target="_blank" rel="noopener">article ↗</a></li>
+      <li>GPUs on different nodes communicate via Ethernet (~200 MB/s)</li>
+    </ul>
+
+    <p>Modern (in the data center):</p>
+
+    <figure>
+      <img src="images/l07/gpu-node-overview.png" width="700" alt="GPU node overview">
+    </figure>
+
+    <p>Typical setup:</p>
+
+    <ul>
+      <li>8 GPUs per node, connected by NVLink to an NVSwitch (B200s&#x27; NVLink 5.0 gets 1.8 TB/s; HBM was 8 TB/s)</li>
+      <li>256 nodes per pod, connected by Infiniband (via PCIe -&gt; HCA / Infiniband NIC -&gt; Infiniband cable) (~0.05 TB/s)</li>
+      <li>N pods per cluster / datacenter, connected by Ethernet (via PCIe -&gt; CPU)</li>
+    </ul>
+
+    <p>Bypassing the CPU:</p>
+
+    <ul>
+      <li>Ethernet requires passing through the CPU (copying data to kernel socket buffer, build TCP packets, copy to NIC ring buffer)</li>
+      <li>Remote Direct Memory Access (RDMA): allows one GPU to directly read/write another GPU&#x27;s memory without involving the CPU</li>
+      <li>Infiniband supports RDMA, but standard Ethernet does not</li>
+    </ul>
+
+    <p>Advancements:</p>
+
+    <ul>
+      <li>GB200/GB300 NVL72: 8 GPUs per tray, 9 trays per rack -&gt; 72 GPUs in one NVLink domain</li>
+      <li>RDMA over Converged Ethernet (RoCE): Ethernet bypasses CPU, similar but cheaper/weaker than Infiniband, used by Meta</li>
+    </ul>
+
+    <h3 id="nvidia-collective-communication-library-nccl">NVIDIA Collective Communication Library (NCCL)</h3>
+
+    <p>NCCL translates collective operations into low-level packets that are sent between GPUs. <a class="src-link" href="https://www.nvidia.com/en-us/on-demand/session/gtcspring21-s31880/" target="_blank" rel="noopener">talk ↗</a></p>
+
+    <ul>
+      <li>Detects topology of hardware (e.g., number of nodes, switches, NVLink/PCIe)</li>
+      <li>Optimizes the path between GPUs</li>
+      <li>Launches GPU kernels to send/receive data</li>
+    </ul>
+
+    <h2 id="torch-distributed">Torch distributed</h2>
+
+    <p>PyTorch distributed library (<code>torch.distributed</code>) <a class="src-link" href="https://pytorch.org/docs/stable/distributed.html" target="_blank" rel="noopener">documentation ↗</a></p>
+
+    <ul>
+      <li>Provides clean interface for collective operations (e.g., <code>all_gather_into_tensor</code>)</li>
+      <li>Supports multiple backends for different hardware: gloo (CPU), nccl (GPU)</li>
+      <li>Also supports higher-level algorithms (e.g., <code>FullyShardedDataParallel</code>) [not used in this course]</li>
+    </ul>
+
+    <p>Let&#x27;s walk through some examples.</p>
+
+    <pre><code class="language-python">spawn(collective_operations_main, world_size=4)</code></pre>
+
+    <details class="toggle">
+      <summary>Source <span class="name">spawn()</span></summary>
+      <pre><code class="language-python">def spawn(func: Callable, world_size: int, *args, **kwargs):
+    &quot;&quot;&quot;
+    Launches `world_size` processes that each calls `func` on world_size, args, kwargs.
+    Note: if we are being traced (inside edtrace), we just run the function directly without multiprocessing and disable distributed functions.
+    &quot;&quot;&quot;
+    # Note: assume kwargs are in the same order as what main needs
+    if not sys.gettrace():
+        # This is the normal code path for multiprocessing
+        args = (world_size,) + args + tuple(kwargs.values())
+        mp.spawn(func, args=args, nprocs=world_size, join=True)
+    else:
+        # If we&#x27;re being traced (inside edtrace), just run the function directly.
+        with DisableDistributed():  # @stepover
+            args = (0, world_size,) + args + tuple(kwargs.values())
+            func(*args)</code></pre>
+    </details>
+
+    <h4 id="collective-operations-main">Collective operations main</h4>
+
+    <pre><code class="language-python">&quot;&quot;&quot;This function is running asynchronously for each process (rank = 0, ..., world_size - 1).&quot;&quot;&quot;
+setup(rank, world_size)
+
+### All-reduce (dist = torch.distributed)
+dist.barrier()  # Waits for all processes to get to this point (in this case, for print statements)
+
+data = tensor([0., 1, 2, 3], device=cuda_if_available(rank)) + rank  # Both input and output
+
+print(f&quot;Rank {rank} [before all-reduce]: {data}&quot;, flush=True)
+dist.all_reduce(tensor=data, op=dist.ReduceOp.SUM, async_op=False)  # Modifies tensor in place
+print(f&quot;Rank {rank} [after all-reduce]: {data}&quot;, flush=True)
+
+### Reduce-scatter
+dist.barrier()
+
+input = torch.arange(world_size, dtype=torch.float32, device=cuda_if_available(rank)) + rank  # Input
+output = torch.empty(1, device=cuda_if_available(rank))  # Allocate output
+
+print(f&quot;Rank {rank} [before reduce-scatter]: input = {input}, output = {output}&quot;, flush=True)
+dist.reduce_scatter_tensor(output=output, input=input, op=dist.ReduceOp.SUM, async_op=False)
+print(f&quot;Rank {rank} [after reduce-scatter]: input = {input}, output = {output}&quot;, flush=True)
+
+### All-gather
+dist.barrier()
+
+input = output  # Input is the output of reduce-scatter
+output = torch.empty(world_size, device=cuda_if_available(rank))  # Allocate output
+
+print(f&quot;Rank {rank} [before all-gather]: input = {input}, output = {output}&quot;, flush=True)
+dist.all_gather_into_tensor(output_tensor=output, input_tensor=input, async_op=False)
+print(f&quot;Rank {rank} [after all-gather]: input = {input}, output = {output}&quot;, flush=True)</code></pre>
+
+    <details class="toggle">
+      <summary>Source <span class="name">setup()</span></summary>
+      <pre><code class="language-python">def setup(rank: int, world_size: int):
+    &quot;&quot;&quot;Initializes the distributed environment (called at start of process).&quot;&quot;&quot;
+    # Specify where master lives (rank 0), used to coordinate (actual data goes through NCCL)
+    os.environ[&quot;MASTER_ADDR&quot;] = &quot;localhost&quot;
+    os.environ[&quot;MASTER_PORT&quot;] = &quot;15623&quot;
+
+    if torch.cuda.is_available():
+        dist.init_process_group(&quot;nccl&quot;, rank=rank, world_size=world_size)
+    else:
+        dist.init_process_group(&quot;gloo&quot;, rank=rank, world_size=world_size)</code></pre>
+    </details>
+
+    <p>Indeed, all-reduce = reduce-scatter + all-gather!</p>
+
+    <h4 id="cleanup">Cleanup</h4>
+
+    <pre><code class="language-python">&quot;&quot;&quot;Cleans up the distributed environment (called at end of process).&quot;&quot;&quot;
+torch.distributed.destroy_process_group()</code></pre>
+
+    <h2 id="benchmarking">Benchmarking</h2>
+
+    <p>How fast does communication happen?</p>
+
+    <pre><code class="language-python"># All-reduce
+spawn(all_reduce, world_size=4, num_elements=100 * 1024**2)
+
+# Reduce-scatter
+spawn(reduce_scatter, world_size=4, num_elements=100 * 1024**2)</code></pre>
+
+    <details class="toggle">
+      <summary>Source <span class="name">all_reduce()</span></summary>
+      <pre><code class="language-python">def all_reduce(rank: int, world_size: int, num_elements: int):
+    setup(rank, world_size)  # @stepover
+
+    # Create tensor
+    data = torch.randn(num_elements, device=cuda_if_available(rank))
+
+    # Warmup
+    dist.all_reduce(tensor=data, op=dist.ReduceOp.SUM, async_op=False)
+    torch.cuda.synchronize()  # Wait for CUDA kernels to finish
+    dist.barrier()            # Wait for all the processes to get here
+
+    # Perform all-reduce
+    start_time = time.time()
+    dist.all_reduce(tensor=data, op=dist.ReduceOp.SUM, async_op=False)
+    torch.cuda.synchronize()  # Wait for CUDA kernels to finish
+    dist.barrier()            # Wait for all the processes to get here
+    end_time = time.time()
+
+    duration = end_time - start_time
+    print(f&quot;[all_reduce] Rank {rank}: all_reduce(world_size={world_size}, num_elements={num_elements}) took {render_duration(duration)}&quot;, flush=True)  # @stepover
+
+    # Measure the effective bandwidth
+    dist.barrier()
+    size_bytes = data.element_size() * data.numel()
+    sent_bytes = size_bytes * 2 * (world_size - 1)  # 2x because send + receive, world_size-1 steps in all-reduce
+    total_duration = world_size * duration
+    bandwidth = sent_bytes / total_duration
+    print(f&quot;[all_reduce] Rank {rank}: all_reduce measured bandwidth = {round(bandwidth / 1024**3)} GB/s&quot;, flush=True)
+
+    # Notes:
+    # - Effective bandwidth ~ 2 * size_bytes / total_duration
+    # - Independent of world_size
+    # - Independent of topology (ring or tree)
+
+    cleanup()</code></pre>
+    </details>
+
+    <details class="toggle">
+      <summary>Source <span class="name">reduce_scatter()</span></summary>
+      <pre><code class="language-python">def reduce_scatter(rank: int, world_size: int, num_elements: int):
+    setup(rank, world_size)  # @stepover
+
+    # Create input and outputs
+    input = torch.randn(world_size, num_elements, device=cuda_if_available(rank))  # Each rank has a matrix
+    output = torch.empty(num_elements, device=cuda_if_available(rank))
+
+    # Warmup
+    dist.reduce_scatter_tensor(output=output, input=input, op=dist.ReduceOp.SUM, async_op=False)
+    torch.cuda.synchronize()  # Wait for CUDA kernels to finish
+    dist.barrier()            # Wait for all the processes to get here
+
+    # Perform reduce-scatter
+    start_time = time.time()
+    dist.reduce_scatter_tensor(output=output, input=input, op=dist.ReduceOp.SUM, async_op=False)
+    torch.cuda.synchronize()  # Wait for CUDA kernels to finish
+    dist.barrier()            # Wait for all the processes to get here
+    end_time = time.time()
+
+    duration = end_time - start_time
+    print(f&quot;[reduce_scatter] Rank {rank}: reduce_scatter(world_size={world_size}, num_elements={num_elements}) took {render_duration(duration)}&quot;, flush=True)  # @stepover
+
+    # Measure the effective bandwidth
+    dist.barrier()
+    data_bytes = input.element_size() * input.numel()  # How much data in the input
+    sent_bytes = data_bytes * (world_size - 1)  # How much needs to be sent (no 2x here)
+    total_duration = world_size * duration  # Total time for transmission
+    bandwidth = sent_bytes / total_duration
+    print(f&quot;[reduce_scatter] Rank {rank}: reduce_scatter measured bandwidth = {round(bandwidth / 1024**3)} GB/s&quot;, flush=True)
+
+    # Notes:
+    # - all-reduce = reduce-scatter + all-gather
+    # - all-reduce moves 2x the data in 2x the time compared to reduce-scatter, so similar bandwidth
+
+    cleanup()</code></pre>
+    </details>
+
+    <details class="toggle">
+      <summary>Source <span class="name">render_duration()</span></summary>
+      <pre><code class="language-python">def render_duration(duration: float) -&gt; str:
+    if duration &lt; 1e-3:
+        return f&quot;{duration * 1e6:.2f}us&quot;
+    if duration &lt; 1:
+        return f&quot;{duration * 1e3:.2f}ms&quot;
+    return f&quot;{duration:.2f}s&quot;</code></pre>
+    </details>
+
+    <p>References: <a class="src-link" href="https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md#allreduce" target="_blank" rel="noopener">How to reason about collective operations ↗</a> <a class="src-link" href="https://github.com/stas00/ml-engineering/blob/master/network/benchmarks/all_reduce_bench.py" target="_blank" rel="noopener">Sample benchmarking code ↗</a></p>
+
+    <h2 id="part-2-distributed-training">Part 2: distributed training</h2>
+
+    <p>Walk through bare-bones implementations of each strategy on deep MLPs.</p>
+
+    <p>Recall that MLPs are the compute bottleneck in Transformers, so this is representative.</p>
+
+    <h2 id="data-parallelism">Data parallelism</h2>
+
+    <figure>
+      <img src="images/l07/data-parallelism.png" width="300" alt="Data parallelism">
+    </figure>
+
+    <p>Sharding strategy: each rank gets a slice of the data</p>
+
+    <pre><code class="language-python">data = generate_sample_data()
+spawn(data_parallelism_main, world_size=4, data=data, num_layers=4, num_steps=1)</code></pre>
+
+    <details class="toggle">
+      <summary>Source <span class="name">generate_sample_data()</span></summary>
+      <pre><code class="language-python">def generate_sample_data():
+    batch_size = 128
+    num_dim = 1024
+    data = torch.randn(batch_size, num_dim)
+    return data</code></pre>
+    </details>
+
+    <details class="toggle">
+      <summary>Source <span class="name">data_parallelism_main()</span></summary>
+      <pre><code class="language-python">def data_parallelism_main(rank: int, world_size: int, data: tensor, num_layers: int, num_steps: int):
+    setup(rank, world_size)  # @stepover
+
+    # Get the slice of data for this rank (in practice, each rank should load only its own data)
+    # --- B0 ---
+    # --- B1 ---
+    # --- B2 ---
+    # --- B3 ---
+    batch_size = data.size(0)  # @inspect batch_size
+    num_dim = data.size(1)  # @inspect num_dim
+    local_batch_size = int_divide(batch_size, world_size)  # @inspect local_batch_size @stepover
+    start_index = rank * local_batch_size  # @inspect start_index
+    end_index = start_index + local_batch_size  # @inspect end_index
+    data = data[start_index:end_index].to(cuda_if_available(rank))
+
+    # Create MLP parameters params[0], ..., params[num_layers - 1] (each rank has all parameters)
+    params = [get_init_params(num_dim, num_dim, rank) for layer in range(num_layers)]
+    optimizer = torch.optim.AdamW(params, lr=1e-3)  # Each rank has own optimizer state
+
+    for step in range(num_steps):
+        # Forward pass
+        x = data
+        for param in params:
+            x = x @ param
+            x = F.gelu(x)
+        loss = x.square().mean()  # Loss function is average squared magnitude
+
+        # Backward pass
+        loss.backward()
+
+        # Sync gradients across workers (ONLY difference between standard training and DDP)
+        for param in params:
+            dist.all_reduce(tensor=param.grad, op=dist.ReduceOp.AVG, async_op=False)
+
+        # Update parameters
+        optimizer.step()
+
+        print(f&quot;[data_parallelism] Rank {rank}: step = {step}, loss = {loss.item()}, params = {[summarize_tensor(params[layer]) for layer in range(num_layers)]}&quot;, flush=True)  # @stepover
+
+    cleanup()</code></pre>
+    </details>
+
+    <details class="toggle">
+      <summary>Source <span class="name">int_divide()</span></summary>
+      <pre><code class="language-python">def int_divide(a: int, b: int):
+    &quot;&quot;&quot;Return a / b and throw an error if there&#x27;s a remainder.&quot;&quot;&quot;
+    assert a % b == 0
+    return a // b</code></pre>
+    </details>
+
+    <details class="toggle">
+      <summary>Source <span class="name">get_init_params()</span></summary>
+      <pre><code class="language-python">def get_init_params(num_inputs: int, num_outputs: int, rank: int) -&gt; nn.Parameter:
+    &quot;&quot;&quot;Create parameters and put them on the `rank`-th GPU.&quot;&quot;&quot;
+    torch.random.manual_seed(0)  # For reproducibility
+    return nn.Parameter(torch.randn(num_inputs, num_outputs, device=cuda_if_available(rank)) / math.sqrt(num_outputs))</code></pre>
+    </details>
+
+    <details class="toggle">
+      <summary>Source <span class="name">summarize_tensor()</span></summary>
+      <pre><code class="language-python">def summarize_tensor(tensor: tensor) -&gt; str:
+    return &quot;x&quot;.join(map(str, tensor.shape)) + &quot;[&quot; + str(round(tensor.view(-1)[0].item(), 4)) + &quot;...]&quot;</code></pre>
+    </details>
+
+    <p>Notes:</p>
+
+    <ul>
+      <li>Losses are different across ranks (computed on local data)</li>
+      <li>Gradients are all-reduced to be the same across ranks</li>
+      <li>Therefore, parameters remain the same across ranks</li>
+    </ul>
+
+    <p>Next time: FSDP/ZeRO: use all-gather and reduce-scatter to avoid holding all parameters in memory</p>
+
+    <h2 id="tensor-parallelism">Tensor parallelism</h2>
+
+    <figure>
+      <img src="images/l07/tensor-parallelism.png" width="300" alt="Tensor parallelism">
+    </figure>
+
+    <p>Sharding strategy: each rank gets part of each layer, transfer all data/activations</p>
+
+    <pre><code class="language-python">data = generate_sample_data()
+spawn(tensor_parallelism_main, world_size=4, data=data, num_layers=4)</code></pre>
+
+    <details class="toggle">
+      <summary>Source <span class="name">tensor_parallelism_main()</span></summary>
+      <pre><code class="language-python">def tensor_parallelism_main(rank: int, world_size: int, data: tensor, num_layers: int):
+    setup(rank, world_size)  # @stepover
+
+    data = data.to(cuda_if_available(rank))  # All ranks get the data (batch_size x num_dim)
+    batch_size = data.size(0)  # @inspect batch_size
+    num_dim = data.size(1)  # @inspect num_dim
+    local_num_dim = int_divide(num_dim, world_size)  # Shard `num_dim`  @inspect local_num_dim @stepover
+
+    # Create model (each rank gets 1/world_size of the parameters)
+    #  |  |  |  |
+    # W0 W1 W2 W3
+    #  |  |  |  |
+    params = [get_init_params(num_dim, local_num_dim, rank) for layer in range(num_layers)]
+
+    # Forward pass
+    x = data
+    for layer in range(num_layers):
+        # Compute activations (batch_size x local_num_dim)
+        x = x @ params[layer]  # Note: this is only on a slice of the parameters
+        x = F.gelu(x)
+
+        # Allocate memory for activations (world_size x batch_size x local_num_dim)
+        activations = [torch.empty(batch_size, local_num_dim, device=cuda_if_available(rank)) for _ in range(world_size)]
+
+        # Send activations via all gather
+        dist.all_gather(tensor_list=activations, tensor=x, async_op=False)
+
+        # Concatenate them to get batch_size x num_dim
+        x = torch.cat(activations, dim=1)
+
+    print(f&quot;[tensor_parallelism] Rank {rank}: forward pass produced activations {summarize_tensor(x)}&quot;, flush=True)  # @stepover
+
+    # Backward pass: homework exercise
+
+    cleanup()</code></pre>
+    </details>
+
+    <h2 id="pipeline-parallelism">Pipeline parallelism</h2>
+
+    <figure>
+      <img src="images/l07/pipeline-parallelism.png" width="300" alt="Pipeline parallelism">
+    </figure>
+
+    <p>Sharding strategy: each rank gets subset of layers, transfer all data/activations</p>
+
+    <pre><code class="language-python">data = generate_sample_data()
+spawn(pipeline_parallelism_main, world_size=2, data=data, num_layers=4, num_micro_batches=4)</code></pre>
+
+    <h4 id="pipeline-parallelism-main">Pipeline parallelism main</h4>
+
+    <pre><code class="language-python">setup(rank, world_size)  # @stepover
+
+# Use all the data
+data = data.to(cuda_if_available(rank))
+batch_size = data.size(0)  # @inspect batch_size
+num_dim = data.size(1)  # @inspect num_dim
+
+# Split up layers
+local_num_layers = int_divide(num_layers, world_size)  # @inspect local_num_layers @stepover
+
+# Each rank gets a subset of layers
+local_params = [get_init_params(num_dim, num_dim, rank) for layer in range(local_num_layers)]  # @stepover
+
+# Forward pass
+
+# Break up into micro batches to minimize the bubble
+micro_batch_size = int_divide(batch_size, num_micro_batches)  # @inspect micro_batch_size @stepover
+if rank == 0:
+    # The data
+    micro_batches = data.chunk(chunks=num_micro_batches, dim=0)
+else:
+    # Allocate memory for activations
+    micro_batches = [torch.empty(micro_batch_size, num_dim, device=cuda_if_available(rank)) for _ in range(num_micro_batches)]
+
+for x in micro_batches:
+    # Get activations from previous rank
+    if rank - 1 &gt;= 0:
+        dist.recv(tensor=x, src=rank - 1)
+
+    # Compute layers assigned to this rank
+    for param in local_params:
+        x = x @ param
+        x = F.gelu(x)
+
+    # Send to the next rank
+    if rank + 1 &lt; world_size:
+        print(f&quot;[pipeline_parallelism] Rank {rank}: sending {summarize_tensor(x)} to rank {rank + 1}&quot;, flush=True)  # @stepover
+        dist.send(tensor=x, dst=rank + 1)</code></pre>
+
+    <p>Not handled: overlapping communication/computation to eliminate pipeline bubbles</p>
+
+    <h4 id="cleanup">Cleanup</h4>
+
+    <pre><code class="language-python">&quot;&quot;&quot;Cleans up the distributed environment (called at end of process).&quot;&quot;&quot;
+torch.distributed.destroy_process_group()</code></pre>
+
+    <p>What&#x27;s missing?</p>
+
+    <ul>
+      <li>Communication/computation overlap</li>
+      <li>More general models (with attention, etc.)</li>
+      <li>Other forms of parallelism (e.g., sequence parallelism, expert parallelism, combinations)</li>
+      <li>Jax/TPUs: just define the model, the sharding strategy, and the Jax compiler handles the rest <a class="src-link" href="https://crfm.stanford.edu/2023/06/16/levanter-1_0-release.html" target="_blank" rel="noopener">levanter ↗</a></li>
+      <li>But we&#x27;re doing PyTorch so you can see how one builds up from the primitives</li>
+    </ul>
+
+    <h2 id="summary">Summary</h2>
+
+    <ul>
+      <li>Many ways to parallelize: data (batch), tensor/expert (width), pipeline (depth), sequence (length)</li>
+      <li>Data parallelism: DDP (all-reduce), FSDP/ZeRO (all-gather + reduce-scatter)</li>
+      <li>Tensor parallelism: requires very fast interconnects (e.g., NVLink)</li>
+      <li>Pipeline parallelism: can work with slow interconnects, but need to work to reduce pipeline bubbles</li>
+      <li>Can <strong>re-compute</strong> or store in <strong>memory</strong> or store in another GPUs memory and <strong>communicate</strong></li>
+      <li>Hardware is getting faster, but will always want bigger models, so will have this hierarchical structure</li>
+    </ul>
+
+    <!-- PAGER:START -->
+    <nav class="pager">
+      <a class="prev" href="06-kernels-benchmarking-profiling-and-triton.html"><span class="dir">← Previous</span><span class="ttl">Kernels: Benchmarking, Profiling and Triton</span></a>
+      <a class="next" href="lecture_08.pdf"><span class="dir">Next →</span><span class="ttl">Parallelism Basics</span></a>
+    </nav>
+    <!-- PAGER:END -->
+  </main>
+</div>
+</body>
+</html>

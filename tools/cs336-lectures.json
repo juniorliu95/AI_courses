@@ -1,0 +1,78 @@
+{
+  "03": {
+    "title": "Architectures and Hyperparameters",
+    "summary": "Everything you didn't want to know about LM architecture and hyperparameters (PDF notes).",
+    "date": "2026-09-21",
+    "tags": "architecture, hyperparameters"
+  },
+  "04": {
+    "title": "Attention Alternatives and Mixture of Experts",
+    "summary": "Controlling the cost of attention as context grows: combining local and global attention, more radical attention alternatives, and mixture-of-experts layers.",
+    "tags": "attention, MoE, long context"
+  },
+  "05": {
+    "title": "GPUs",
+    "summary": "Making CUDA and GPUs less magic: the execution and memory hierarchy, and what shapes matrix multiplication performance.",
+    "tags": "GPU, CUDA, performance"
+  },
+  "06": {
+    "title": "Kernels: Benchmarking, Profiling and Triton",
+    "summary": "Finding the bottlenecks with benchmarking and profiling, then writing Triton kernels: GeLU (elementwise), softmax (row-wise), row sum, and a tiled matmul.",
+    "tags": "Triton, kernels, profiling"
+  },
+  "07": {
+    "title": "Parallelism",
+    "summary": "Parallelism across GPUs: collective operations, the hardware underneath, torch.distributed, and data, tensor and pipeline parallelism.",
+    "tags": "parallelism, distributed, collectives"
+  },
+  "08": {
+    "title": "Parallelism Basics",
+    "summary": "Networking for LLM training, the different forms of parallel training, and how they are combined to scale up.",
+    "tags": "parallelism, networking, systems"
+  },
+  "09": {
+    "title": "Scaling Laws: Basics",
+    "summary": "Taking scaling seriously: how to choose architecture and hyperparameters for a large run from small ones, rather than cargo-culting existing models.",
+    "tags": "scaling laws, compute-optimal"
+  },
+  "10": {
+    "title": "Inference",
+    "summary": "The inference workload: arithmetic intensity of prefill vs decode, throughput and latency, shrinking the KV cache, quantization, pruning, speculative sampling, continuous batching and paged attention.",
+    "tags": "inference, KV cache, quantization"
+  },
+  "11": {
+    "title": "Scaling: Case Study and Details",
+    "summary": "Does Chinchilla's approach to scaling actually work? Best practices for scaling and hyperparameter tuning, with recent models as case studies.",
+    "tags": "scaling laws, hyperparameters"
+  },
+  "12": {
+    "title": "Evaluation",
+    "summary": "What it means for a model to be good: perplexity, exam, chat, agentic, reasoning and safety benchmarks, and the questions of realism and validity.",
+    "tags": "evaluation, benchmarks"
+  },
+  "13": {
+    "title": "Data I",
+    "summary": "Where pretraining data comes from: raw sources and copyright, Common Crawl, and the lineage of public corpora from WebText and C4 through Dolma, DCLM and the Common Pile.",
+    "tags": "data, corpora, copyright"
+  },
+  "14": {
+    "title": "Data II",
+    "summary": "Turning raw dumps into training data: transformation, filtering, deduplication, data mixing, and post-training data.",
+    "tags": "data, filtering, deduplication"
+  },
+  "15": {
+    "title": "After Pretraining: Mid and Post Training",
+    "summary": "Getting from a pretrained model to one that follows instructions: the mid- and post-training stack.",
+    "tags": "post-training, SFT, RLHF"
+  },
+  "16": {
+    "title": "Post-training 2: RL from Verifiable Rewards",
+    "summary": "Scaling reinforcement learning past the overoptimization limits of RLHF, into domains with verifiable rewards - the path to o1/R1-style models.",
+    "tags": "RLVR, reasoning, RL"
+  },
+  "17": {
+    "title": "Multimodal Models",
+    "summary": "Vision-language models: CLIP and SigLIP, the LLaVA line, Qwen-VL through Qwen3-VL, and early-fusion Chameleon.",
+    "tags": "multimodal, vision-language, CLIP"
+  }
+}

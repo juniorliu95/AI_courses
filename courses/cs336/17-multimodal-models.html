@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multimodal Models · Language Modeling from Scratch</title>
+<meta name="description" content="Vision-language models: CLIP and SigLIP, the LLaVA line, Qwen-VL through Qwen3-VL, and early-fusion Chameleon.">
+<meta name="note:course" content="Language Modeling from Scratch">
+<meta name="note:number" content="17">
+<meta name="note:date" content="">
+<meta name="note:tags" content="multimodal, vision-language, CLIP">
+<script>(function(){try{var t=localStorage.getItem('notes-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}})();</script>
+<link rel="stylesheet" href="../../assets/notes.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="../../assets/notes.js"></script>
+</head>
+<body>
+<div class="progress"><div class="progress__bar" id="progressBar"></div></div>
+
+<header class="topbar">
+  <button class="iconbtn sidebar-toggle" data-sidebar-toggle aria-label="Toggle contents">☰</button>
+  <a class="topbar__brand" href="../../index.html">AI Notes<span class="dot">.</span></a>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <span class="sep">/</span>
+    <!-- CRUMB:START --><a href="index.html">Language Modeling from Scratch</a><!-- CRUMB:END -->
+    <span class="sep">/</span>
+    <span class="current">Multimodal Models</span>
+  </nav>
+  <span class="topbar__spacer"></span>
+  <button class="iconbtn" data-theme-toggle aria-label="Toggle theme">☾</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <p class="sidebar__label">Course</p>
+    <a class="sidebar__course" href="index.html">Language Modeling from Scratch</a>
+    <p class="sidebar__meta">Lecture 17 · </p>
+
+    <p class="sidebar__label">On this page</p>
+    <nav class="toc" id="toc" aria-label="Table of contents"></nav>
+
+    <!-- SIBLINGS:START -->
+    <hr>
+    <p class="sidebar__label">Lectures</p>
+    <nav class="toc">
+      <ul>
+        <li><a href="01-overview-and-tokenization.html">01 · Overview and Tokenization</a></li>
+        <li><a href="02-resource-accounting.html">02 · Resource Accounting</a></li>
+        <li><a href="lecture_03.pdf">03 · Architectures and Hyperparameters</a></li>
+        <li><a href="lecture_04.pdf">04 · Attention Alternatives and Mixture of Experts</a></li>
+        <li><a href="lecture_05.pdf">05 · GPUs</a></li>
+        <li><a href="06-kernels-benchmarking-profiling-and-triton.html">06 · Kernels: Benchmarking, Profiling and Triton</a></li>
+        <li><a href="07-parallelism.html">07 · Parallelism</a></li>
+        <li><a href="lecture_08.pdf">08 · Parallelism Basics</a></li>
+        <li><a href="lecture_09.pdf">09 · Scaling Laws: Basics</a></li>
+        <li><a href="10-inference.html">10 · Inference</a></li>
+        <li><a href="lecture_11.pdf">11 · Scaling: Case Study and Details</a></li>
+        <li><a href="12-evaluation.html">12 · Evaluation</a></li>
+        <li><a href="13-data-i.html">13 · Data I</a></li>
+        <li><a href="14-data-ii.html">14 · Data II</a></li>
+        <li><a href="lecture_15.pdf">15 · After Pretraining: Mid and Post Training</a></li>
+        <li><a href="lecture_16.pdf">16 · Post-training 2: RL from Verifiable Rewards</a></li>
+        <li><a href="17-multimodal-models.html" class="is-active">17 · Multimodal Models</a></li>
+      </ul>
+    </nav>
+  <!-- SIBLINGS:END -->
+  </aside>
+
+  <main class="content" id="content">
+    <div class="lecture-head">
+      <p class="kicker">Language Modeling from Scratch · Lecture 17</p>
+      <h1>Multimodal Models</h1>
+      <p class="lead">Vision-language models: CLIP and SigLIP, the LLaVA line, Qwen-VL through Qwen3-VL, and early-fusion Chameleon.</p>
+      <ul class="chips">
+        <li class="chip">multimodal, vision-language, CLIP</li>
+        <li><a class="chip chip--accent" href="https://github.com/stanford-cs336/lectures/blob/main/lecture_17.py" target="_blank" rel="noopener">Source ↗</a></li>
+      </ul>
+    </div>
+
+    <p>So far: language models</p>
+
+    <blockquote>text ⇒ text</blockquote>
+
+    <p>The world is multimodal:</p>
+
+    <figure>
+      <img src="images/l17/multimodality.png" width="600" alt="Multimodality">
+    </figure>
+
+    <p>Ultimate goal: <strong>omni model</strong></p>
+
+    <ul>
+      <li>Input any combination of modalities (understanding)</li>
+      <li>Output any combination of modalities (generation)</li>
+    </ul>
+
+    <p>Where we are today:</p>
+
+    <ul>
+      <li>Transformers work really well. So we gotta use them.</li>
+      <li>Transformers speak tokens (discrete or continuous), where a token represents some ~semantic unit of information.</li>
+      <li>Therefore, we must convert everything into tokens.</li>
+      <li>Note: we had to do this with text (recall the tokenization lecture).</li>
+      <li>For non-text modalities, this is more challenging...</li>
+    </ul>
+
+    <p>Questions:</p>
+
+    <ol>
+      <li>How do we input non-text data (e.g., understand images)?</li>
+      <li>How do we output non-text data (e.g., generate audio)?</li>
+    </ol>
+
+    <h2 id="clip">CLIP</h2>
+
+    <p>CLIP (Contrastive Language-Image Pretraining) <a class="src-link" href="https://arxiv.org/abs/2103.00020" target="_blank" rel="noopener">https://arxiv.org/abs/2103.00020 ↗</a></p>
+
+    <p>Context:</p>
+
+    <ul>
+      <li>Computer vision models were trained on annotated images.</li>
+      <li>Question: is it possible to leverage the much larger amount of (image, caption) pairs?</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/clip.png" width="800" alt="CLIP">
+    </figure>
+
+    <p>Method:</p>
+
+    <ul>
+      <li>Get a batch of (image, text) examples (e.g., 32768)</li>
+      <li>Encode each image and each text</li>
+      <li>For each image, prefer its aligned text over other texts</li>
+      <li>For each text, prefer its aligned image over other images</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/clip-code.png" width="400" alt="CLIP code">
+    </figure>
+
+    <p>Data:</p>
+
+    <ul>
+      <li>Searched for 500K queries, get ~20K (image, text) pairs per query</li>
+      <li>Trained on 400M image-text pairs</li>
+      <li>Didn&#x27;t release the dataset</li>
+      <li>Reproduced in OpenCLIP (using LAION-5B dataset, which used CLIP for filtering) <a class="src-link" href="https://arxiv.org/abs/2212.07143" target="_blank" rel="noopener">https://arxiv.org/abs/2212.07143 ↗</a></li>
+    </ul>
+
+    <p>Data processing <a class="src-link" href="https://github.com/openai/CLIP/blob/main/clip/clip.py#L79" target="_blank" rel="noopener">code ↗</a></p>
+
+    <ul>
+      <li>Images come in all resolutions (arbitrary W x H)</li>
+      <li>Resize using bicubic interpolation so shorter side is 336 pixels</li>
+      <li>Center crop (cuts off borders to get 336 x 336)</li>
+    </ul>
+
+    <p>Vision encoder:</p>
+
+    <ul>
+      <li>Experimented with ResNet-50 and Vision Transformers <a class="src-link" href="https://arxiv.org/pdf/2010.11929" target="_blank" rel="noopener">https://arxiv.org/pdf/2010.11929 ↗</a></li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/vit.png" width="600" alt="Vit">
+    </figure>
+
+    <ul>
+      <li>Attention pooling: do QKV with query = global average of activations</li>
+      <li>Best model: ViT-L/14@336px (L = large, 14x14 patches, 3 channels, trained on 336x336 resolution images)</li>
+    </ul>
+
+    <p>Text encoder:</p>
+
+    <ul>
+      <li>GPT-2 Transformer (63M parameters, 12 layers)</li>
+      <li>Encode [BOS] ... [EOS], return [EOS] activation at highest layer</li>
+    </ul>
+
+    <p>Headline result:</p>
+
+    <ul>
+      <li>On ImageNet, zero-shot CLIP outperformed ResNet-50 trained on 1.2M ImageNet images</li>
+    </ul>
+
+    <p>Ablation:</p>
+
+    <ul>
+      <li>Alternative: predict text from images directly</li>
+      <li>Much less compute efficient compared to CLIP-style ranking</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/clip-efficiency.png" width="400" alt="CLIP efficiency">
+    </figure>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Encoding of images captures semantics given by (noisy) text</li>
+      <li>Design decisions chosen based on image classification (not very fine-grained)</li>
+      <li>Technical: requires large batch sizes, softmax operation over full batch</li>
+    </ul>
+
+    <h2 id="siglip">Siglip</h2>
+
+    <p>SigLIP (Sigmoid Loss for Language Image Pre-Training) <a class="src-link" href="https://arxiv.org/abs/2303.15343" target="_blank" rel="noopener">https://arxiv.org/abs/2303.15343 ↗</a></p>
+
+    <p>Objective:</p>
+
+    <ul>
+      <li>CLIP: multiclass classification for (text, image) versus (text, image&#x27;) for all image&#x27;</li>
+      <li>SigLIP: binary classification for (text, image) - aligned or not?</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/siglip-code.png" width="500" alt="Siglip code">
+    </figure>
+
+    <p>Data:</p>
+
+    <ul>
+      <li>WebLI dataset: O(billion) (image, text) pairs <a class="src-link" href="https://arxiv.org/pdf/2209.06794" target="_blank" rel="noopener">https://arxiv.org/pdf/2209.06794 ↗</a></li>
+      <li>Scraped from the Internet</li>
+      <li>Used automatic OCR to extract text from images</li>
+      <li>Keep 10% highest quality</li>
+      <li>Supports 100 languages</li>
+    </ul>
+
+    <p>Efficiency:</p>
+
+    <ul>
+      <li>CLIP: 10 days on 256 TPUv3</li>
+      <li>SigLIP: 5 days on 32 TPUv4 (lower FLOP/s than TPUv3) - much faster!</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/siglip-parallelism.png" width="800" alt="Siglip parallelism">
+    </figure>
+
+    <p>Batch size:</p>
+
+    <ul>
+      <li>Decouple batch size from loss</li>
+      <li>Better than CLIP for &lt;16K batch sizes</li>
+      <li>Go up to 1M batch size, but 32K is enough</li>
+    </ul>
+
+    <h2 id="llava">Llava</h2>
+
+    <p>LLaVA (Large Language and Vision Assistant) <a class="src-link" href="https://arxiv.org/abs/2304.08485" target="_blank" rel="noopener">https://arxiv.org/abs/2304.08485 ↗</a></p>
+
+    <p>Vision encoder: CLIP</p>
+
+    <p>Text decoder: Vicuna (LLaMA fine-tuned on ShareGPT conversations) <a class="src-link" href="https://www.lmsys.org/blog/2023-03-30-vicuna/" target="_blank" rel="noopener">post ↗</a></p>
+
+    <p>Data:</p>
+
+    <ul>
+      <li>MS COCO has images annotated with bounding boxes and Mechanical Turk captions</li>
+      <li>Prompt GPT-4 with captions or detected objects and generate questions or conversations</li>
+      <li>Pair generations with original images</li>
+      <li>158K examples</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-gen.png" width="600" alt="Llava gen">
+    </figure>
+
+    <p>Model:</p>
+
+    <ul>
+      <li>Encode images with CLIP (ViT-L/14)</li>
+      <li>Linear projection (W) into embedding space (Flamingo and Q-former are more complex)</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-architecture.png" width="600" alt="Llava architecture">
+    </figure>
+
+    <p>Training:</p>
+
+    <ul>
+      <li>Stage 1 (alignment): freeze vision encoder and language model, only train W</li>
+      <li>Stage 2 (fine-tuning): freeze vision encoder and train W and language model</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-example.png" width="600" alt="Llava example">
+    </figure>
+
+    <h2 id="llava-onevision">Llava onevision</h2>
+
+    <p>LLaVA OneVision <a class="src-link" href="https://arxiv.org/pdf/2408.03326" target="_blank" rel="noopener">https://arxiv.org/pdf/2408.03326 ↗</a></p>
+
+    <ul>
+      <li>Latest version in the LLaVA series (after LLaVA 1.5, LLaVA-Next)</li>
+      <li>Handle multiple images, video</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-onevision.png" width="600" alt="Llava onevision">
+    </figure>
+
+    <ul>
+      <li>Vision encoder: SigLIP (use grid features before and after last Transformer layer)</li>
+      <li>Text decoder: Qwen-2 72B</li>
+      <li>Projector: 2-layer MLP</li>
+    </ul>
+
+    <p>Data processing:</p>
+
+    <ul>
+      <li>Preserving high resolution is important (e.g., for OCR)</li>
+      <li>CLIP resizes and crops to 336x336, which loses information</li>
+      <li>Solution: AnyRes, introduced in LLaVA 1.5 <a class="src-link" href="https://static.hliu.cc/files/llava/improved_llava.pdf" target="_blank" rel="noopener">paper ↗</a></li>
+      <li>Break up image into a x b pieces (matching resolution of vision encoder), encode, concatenate</li>
+      <li>If too many tokens (original image is too high resolution), then use bilinear interpolation</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-onevision-anyres.png" width="600" alt="Llava onevision anyres">
+    </figure>
+
+    <p>Handle 3 types of input (single image, multiple images, video):</p>
+
+    <ul>
+      <li>Goal: make all of the modalities produce roughly the same length</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-onevision-modalities.png" width="600" alt="Llava onevision modalities">
+    </figure>
+
+    <ul>
+      <li>Single image: use higher resolution</li>
+      <li>Multiple images: use base resolution for each image</li>
+      <li>Video: use lower resolution for each frame</li>
+    </ul>
+
+    <p>Data:</p>
+
+    <ul>
+      <li>Philosophy: quality over quantity</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-onevision-data-1.png" width="700" alt="Llava onevision data 1">
+    </figure>
+
+    <figure>
+      <img src="images/l17/llava-onevision-data-2.png" width="700" alt="Llava onevision data 2">
+    </figure>
+
+    <p>Training:</p>
+
+    <ul>
+      <li>Philosophy: easier to harder</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-onevision-training.png" width="700" alt="Llava onevision training">
+    </figure>
+
+    <p>Transfer between modalities:</p>
+
+    <ul>
+      <li>Single image data for diagrams and charts, but generalize to multi-image</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-onevision-transfer-s1.png" width="600" alt="Llava onevision transfer s1">
+    </figure>
+
+    <ul>
+      <li>OCR on single image data, relational reasoning from multi-image data, generalize to GUI-based agents</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-onevision-transfer-s2.png" width="600" alt="Llava onevision transfer s2">
+    </figure>
+
+    <ul>
+      <li>Visual prompting (circle) in single images, generalize to videos</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/llava-onevision-transfer-s8.png" width="600" alt="Llava onevision transfer s8">
+    </figure>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Standard VLM template: vision encoder + projector + LM</li>
+      <li>Most work goes into data curation (heavy on synthesized, task-specific data)</li>
+      <li>Open-source (released model weights and data)</li>
+    </ul>
+
+    <h2 id="qwen-vl">Qwen vl</h2>
+
+    <p>Qwen-VL <a class="src-link" href="https://arxiv.org/abs/2308.12966" target="_blank" rel="noopener">https://arxiv.org/abs/2308.12966 ↗</a></p>
+
+    <p>Architecture:</p>
+
+    <ul>
+      <li>Vision encoder: OpenCLIP&#x27;s ViT-bigC (14x14 patches) <a class="src-link" href="https://arxiv.org/abs/2212.07143" target="_blank" rel="noopener">https://arxiv.org/abs/2212.07143 ↗</a></li>
+      <li>Adaptor: one layer cross-attention, incorporate 2D positional encodings, maps to fixed length of 256</li>
+      <li>Special tokens: &lt;img&gt;, &lt;box&gt;, &lt;ref&gt;</li>
+    </ul>
+
+    <p>Training:</p>
+
+    <figure>
+      <img src="images/l17/qwen-vl-stages.png" width="700" alt="Qwen vl stages">
+    </figure>
+
+    <ul>
+      <li>Stage 1: large-scale low quality data; freeze LM, train vision encoder + adaptor</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/qwen-vl-stage1.png" width="400" alt="Qwen vl stage1">
+    </figure>
+
+    <ul>
+      <li>Stage 2: higher quality task-specific data, increase resolution; train all parameters</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/qwen-vl-stage2.png" width="400" alt="Qwen vl stage2">
+    </figure>
+
+    <ul>
+      <li>Stage 3: instruction tuning data; freeze visual encoder, train adaptor + LM</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/qwen-vl-examples.png" width="600" alt="Qwen vl examples">
+    </figure>
+
+    <h2 id="qwen2-vl">Qwen2 vl</h2>
+
+    <p>Qwen2-VL <a class="src-link" href="https://arxiv.org/abs/2409.12191" target="_blank" rel="noopener">https://arxiv.org/abs/2409.12191 ↗</a></p>
+
+    <p>Visual encoder: larger ViT (675M)</p>
+
+    <figure>
+      <img src="images/l17/qwen2-vl-architecture.png" width="700" alt="Qwen2 vl architecture">
+    </figure>
+
+    <ul>
+      <li>Key: dynamic resolution to handle varying resolutions</li>
+      <li>Each 224 x 224 patch encoded with ViT/14, compress every 2x2 =&gt; 66 tokens</li>
+      <li>Video: sample 2 frames/sec, max 16384 tokens</li>
+    </ul>
+
+    <p>Multimodal Rotary Position Embedding (MRoPE):</p>
+
+    <figure>
+      <img src="images/l17/qwen2-vl-mrope.png" width="600" alt="Qwen2 vl mrope">
+    </figure>
+
+    <p>Initialize LM with Qwen2 and vision encoder from DFN <a class="src-link" href="https://arxiv.org/abs/2309.17425" target="_blank" rel="noopener">https://arxiv.org/abs/2309.17425 ↗</a></p>
+
+    <p>Training (similar to Qwen-VL):</p>
+
+    <ul>
+      <li>Stage 1: train only visual encoder</li>
+      <li>Stage 2: train all parameters</li>
+      <li>Stage 3: train language model on instruction following datasets</li>
+    </ul>
+
+    <p>Many capabilities:</p>
+
+    <figure>
+      <img src="images/l17/qwen2-vl-capabilities.png" width="700" alt="Qwen2 vl capabilities">
+    </figure>
+
+    <h2 id="qwen3-vl">Qwen3 vl</h2>
+
+    <p>Qwen3-VL <a class="src-link" href="https://arxiv.org/abs/2511.21631" target="_blank" rel="noopener">https://arxiv.org/abs/2511.21631 ↗</a></p>
+
+    <figure>
+      <img src="images/l17/qwen3-vl.png" width="700" alt="Qwen3 vl">
+    </figure>
+
+    <p>Language model:</p>
+
+    <ul>
+      <li>Qwen-3 models (dense and MoE models up to 235B-A22B)</li>
+      <li>Long context understanding (256K)</li>
+    </ul>
+
+    <p>Vision encoder:</p>
+
+    <ul>
+      <li>SigLIP-2 (same architecture as SigLIP) <a class="src-link" href="https://arxiv.org/pdf/2502.14786" target="_blank" rel="noopener">https://arxiv.org/pdf/2502.14786 ↗</a></li>
+      <li>Interleaved MRoPE: distribute all axes (temporal, width, height) to low- and high-frequency bands</li>
+    </ul>
+
+    <p>... [t w h t w h t w h t w h] rather than [t t t t w w w w h h h h]</p>
+
+    <ul>
+      <li>Add explicit video timestamps (as separate tokens rather in positional embeddings)</li>
+      <li>Square-root-normalized per-token loss: balance text and multimodal data (video examples are long, don&#x27;t want to dominate)</li>
+    </ul>
+
+    <p>Adapter:</p>
+
+    <ul>
+      <li>DeepStack: cross-layer fusion to inject visual information into multiple layers <a class="src-link" href="https://arxiv.org/abs/2406.04334" target="_blank" rel="noopener">https://arxiv.org/abs/2406.04334 ↗</a></li>
+    </ul>
+
+    <p>Training:</p>
+
+    <ul>
+      <li>Pre-training has 4 stages (train adapter, train all parameters on 8K, 32K, 256K lengths)</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/qwen3-vl-pretraining.png" width="600" alt="Qwen3 vl pretraining">
+    </figure>
+
+    <ul>
+      <li>Post-training: SFT on long CoT data, knowledge distillation, RL</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/qwen3-vl-results.png" width="600" alt="Qwen3 vl results">
+    </figure>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>SOTA performance</li>
+      <li>Lots of data work, but not many details</li>
+      <li>Minor but potentially important architectural improvements</li>
+      <li>Scale up</li>
+    </ul>
+
+    <h2 id="chameleon">Chameleon</h2>
+
+    <p>Chameleon <a class="src-link" href="https://arxiv.org/pdf/2405.09818" target="_blank" rel="noopener">https://arxiv.org/pdf/2405.09818 ↗</a></p>
+
+    <p>So far: VLMs encode images (via CLIP or SigLIP), inject into LM</p>
+
+    <p>Disadvantage: can&#x27;t generate images (need diffusion)</p>
+
+    <p>Chameleon: map everything into discrete tokens</p>
+
+    <p>Advantage: can analyze and generate images in a uniform way</p>
+
+    <figure>
+      <img src="images/l17/chameleon.png" width="600" alt="Chameleon">
+    </figure>
+
+    <figure>
+      <img src="images/l17/chameleon-example.png" width="600" alt="Chameleon example">
+    </figure>
+
+    <p>Vision encoder <a class="src-link" href="https://arxiv.org/pdf/2203.13131" target="_blank" rel="noopener">https://arxiv.org/pdf/2203.13131 ↗</a></p>
+
+    <ul>
+      <li>Key difference: encoder needs to map to discrete tokens (so we can generate them)</li>
+      <li>VQ-VAE (Vector Quantized Variational Autoencoder) <a class="src-link" href="https://arxiv.org/pdf/1711.00937" target="_blank" rel="noopener">https://arxiv.org/pdf/1711.00937 ↗</a></li>
+      <li>Idea: map image to a discrete codebook, decode back to image and minimize reconstruction loss</li>
+    </ul>
+
+    <figure>
+      <img src="images/l17/vq-vae.png" width="600" alt="Vq VAE">
+    </figure>
+
+    <ul>
+      <li>Encodes 512 x 512 image into 1024 tokens (codebook of size 8192)</li>
+      <li>Train a new BPE tokenizer</li>
+    </ul>
+
+    <p>Training:</p>
+
+    <ul>
+      <li>Stage 1 (80%): large-scale, unsupervised (2.9T text tokens, 1.5T text/image tokens, 400B text/image interleaved tokens)</li>
+      <li>Stage 2 (20%): 50% of stage 1 data, 50% of high quality data</li>
+    </ul>
+
+    <p>Training stability</p>
+
+    <ul>
+      <li>Text tokens have low entropy, image tokens have high entropy, leads to norm growth, logit drift problem</li>
+      <li>Fixes: QK norm, z-loss regularization</li>
+    </ul>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Elegant (just autoregressive modeling of discrete tokens)</li>
+      <li>Not as performant (discretization loses information - think OCR)</li>
+      <li>Training with multiple modalities is tricky</li>
+    </ul>
+
+    <p>Summary:</p>
+
+    <ul>
+      <li>Frontier models are expected to be multimodal (natively multimodal, omni)</li>
+      <li>Fundamental challenge: how to encode non-text modalities?</li>
+      <li>Comprehension and generation might demand different things (semantics versus finer-grained details)</li>
+      <li>Balance images + video (lower information density) and text for training stability</li>
+      <li>Continuous encoders + Transformer + diffusion models for generation</li>
+    </ul>
+
+    <!-- PAGER:START -->
+    <nav class="pager">
+      <a class="prev" href="lecture_16.pdf"><span class="dir">← Previous</span><span class="ttl">Post-training 2: RL from Verifiable Rewards</span></a>
+      <a class="next empty"><span class="dir">End of course</span><span class="ttl">—</span></a>
+    </nav>
+    <!-- PAGER:END -->
+  </main>
+</div>
+</body>
+</html>
