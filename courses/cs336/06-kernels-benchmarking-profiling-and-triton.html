@@ -110,6 +110,23 @@
 
     <p>(B200s also have tensor memory (TMEM) for tensor cores (between registers and shared memory) that are invisible to programmer.)</p>
 
+    <details class="toggle">
+      <summary>My notes <span class="name">what each kind of GPU memory is for</span></summary>
+      <p><strong>HBM (High Bandwidth Memory)</strong> is the main GPU memory, often called VRAM, on the GPUs above. Consumer GPUs typically use GDDR memory for the same role.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Memory</th><th scope="col">Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><strong>HBM</strong></td><td>Large main storage for tensors: model weights, activations, gradients, and other data.</td></tr>
+            <tr><td><strong>L2 / L1 caches</strong></td><td>Keep copies of data close to computation to reduce accesses to main memory.</td></tr>
+            <tr><td><strong>Shared memory</strong></td><td>Fast on-chip workspace shared by threads in a block.</td></tr>
+            <tr><td><strong>Registers</strong></td><td>Very fast on-chip storage for values each thread is working with.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The caches, shared memory, and registers are separate from the advertised GPU memory capacity (e.g., 80 GB). HBM is &ldquo;slow&rdquo; relative to these on-chip memories, so efficient kernels reuse data in shared memory and registers to reduce trips to HBM.</p>
+    </details>
+
     <h3 id="programming-model">Programming model</h3>
 
     <figure>
@@ -217,6 +234,51 @@ occupancy = num_warps / max_warps  # @inspect occupancy</code></pre>
       <li>Solution: swizzling rearranges shared memory (e.g., row xor col) to avoid bank conflicts</li>
     </ul>
 
+    <details class="toggle" id="shared-memory-swizzling-note">
+      <summary>My notes <span class="name">how XOR swizzling avoids bank conflicts</span></summary>
+      <p><strong>Swizzling changes where matrix elements are stored in shared memory so that threads accessing them simultaneously use different banks.</strong> The matrix values stay the same; their storage locations change.</p>
+      <p>Think of banks as independent service counters. Different banks can serve requests in parallel. Requests for <strong>different locations in the same bank</strong> must take turns. Reading the exact same location is an exception: the value can be broadcast. <a href="https://developer.nvidia.com/blog/using-shared-memory-cuda-cc/" target="_blank" rel="noopener">[NVIDIA: shared memory]</a></p>
+      <p>Use a <strong>toy GPU with 4 banks</strong> and a 4&times;4 matrix. Real GPUs in these notes have 32 banks. Each cell below shows the matrix element stored at that physical location.</p>
+
+      <p><strong>Without swizzling:</strong> ordinary row-by-row storage puts every element of the first logical column in bank 0.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Physical row</th><th scope="col">Bank 0</th><th scope="col">Bank 1</th><th scope="col">Bank 2</th><th scope="col">Bank 3</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">0</th><td><strong>A[0,0]</strong></td><td>A[0,1]</td><td>A[0,2]</td><td>A[0,3]</td></tr>
+            <tr><th scope="row">1</th><td><strong>A[1,0]</strong></td><td>A[1,1]</td><td>A[1,2]</td><td>A[1,3]</td></tr>
+            <tr><th scope="row">2</th><td><strong>A[2,0]</strong></td><td>A[2,1]</td><td>A[2,2]</td><td>A[2,3]</td></tr>
+            <tr><th scope="row">3</th><td><strong>A[3,0]</strong></td><td>A[3,1]</td><td>A[3,2]</td><td>A[3,3]</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Suppose four threads read the first column: the four <strong>bold</strong> elements. They all need <strong>bank 0</strong>, so their accesses are serialized.</p>
+
+      <p><strong>With XOR swizzling:</strong> store each element using this mapping:</p>
+      <pre><code class="language-python">physical_row = row
+physical_col = row ^ col  # ^ means bitwise XOR</code></pre>
+      <p>XOR compares bits: equal bits give <code>0</code>; different bits give <code>1</code>. For example, <code>1 XOR 3 = 2</code>, because <code>01 XOR 11 = 10</code>. Applying the rule gives:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Physical row</th><th scope="col">Bank 0</th><th scope="col">Bank 1</th><th scope="col">Bank 2</th><th scope="col">Bank 3</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">0</th><td><strong>A[0,0]</strong></td><td>A[0,1]</td><td>A[0,2]</td><td>A[0,3]</td></tr>
+            <tr><th scope="row">1</th><td>A[1,1]</td><td><strong>A[1,0]</strong></td><td>A[1,3]</td><td>A[1,2]</td></tr>
+            <tr><th scope="row">2</th><td>A[2,2]</td><td>A[2,3]</td><td><strong>A[2,0]</strong></td><td>A[2,1]</td></tr>
+            <tr><th scope="row">3</th><td>A[3,3]</td><td>A[3,2]</td><td>A[3,1]</td><td><strong>A[3,0]</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Now the <strong>same logical first column</strong> is spread across <strong>four different banks</strong>, so those reads can proceed in parallel. Every other logical column also uses all four banks, and reading any complete row still uses four different banks.</p>
+      <p>The program must use the mapping consistently for both writes and reads (pseudocode):</p>
+      <pre><code class="language-python"># Store the logical element A[row, col]:
+shared[row, row ^ col] = A[row, col]
+
+# Later, after the writes are complete, retrieve that same element:
+value = shared[row, row ^ col]</code></pre>
+      <p>For a <strong>32&times;32 float32 tile</strong> starting at bank 0, the same principle works with 32 banks: the bank for <code>A[row, col]</code> becomes <code>row XOR col</code>. Holding either index fixed and varying the other from 0&ndash;31 visits every bank once. This eliminates conflicts for those row and column access patterns. NVIDIA documents the same layout principle in its <a href="https://docs.nvidia.com/cuda/archive/13.2.1/cuda-programming-guide/04-special-topics/async-copies.html" target="_blank" rel="noopener">shared-memory swizzling guide</a>.</p>
+    </details>
+
     <p><strong>Memory coalescing</strong> (HBM):</p>
 
     <ul>
@@ -229,6 +291,21 @@ M32 M33 M34 M35 M36 M37 M38 M39 M40 M41 M42 M43 M44 M45 M46 M47 M48 M49 M50 M51 
     <ul>
       <li>Best case: full coalescing, all threads access the same cache line (32 threads x 4 bytes = 128 bytes).</li>
     </ul>
+
+    <details class="toggle" id="banks-coalescing-swizzling-note">
+      <summary>My notes <span class="name">banks, coalescing, and swizzling</span></summary>
+      <p><strong>Coalescing combines memory requests; it does not create banks.</strong> Banks already exist in the hardware.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Concept</th><th scope="col">What it means</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Banks</strong></td><td>Shared memory is physically divided into 32 banks that can serve accesses in parallel. This is built into the hardware.</td></tr>
+            <tr><td><strong>Coalescing</strong></td><td>When threads request nearby addresses in global memory (HBM/GDDR), the hardware groups those requests into fewer memory transactions.</td></tr>
+            <tr><td><strong>Swizzling</strong></td><td>We arrange data in shared memory so simultaneous accesses go to different banks.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
 
     <p><strong>Block occupancy</strong>:</p>
 
