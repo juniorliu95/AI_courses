@@ -11,7 +11,7 @@ templates/lecture.html         ← the note template new lectures are stamped fr
 templates/components.html      ← living reference: every block rendered next to its markup
 tools/notes.py                 ← scaffolding + index generation
 courses/<slug>/course.json     ← course metadata you edit by hand (optional "links": [{label, href}]
-                                 adds a chip on the course page — e.g. a coding-assignments folder)
+                                 adds a chip on the course page — e.g. supplementary resources)
 courses/<slug>/index.html      ← generated: lecture list for that course
 courses/<slug>/NN-title.html   ← one note per lecture — this is what you actually write
 ```

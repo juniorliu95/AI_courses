@@ -10,12 +10,6 @@
     "systems"
   ],
   "order": 1,
-  "links": [
-    {
-      "label": "Coding assignments →",
-      "href": "assignments/"
-    }
-  ],
   "pdfs": [
     {
       "file": "lecture_03.pdf",

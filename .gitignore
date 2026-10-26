@@ -1,27 +1,14 @@
 # Markdown drafts. Notes are written in Markdown first and converted to HTML —
 # only the HTML is worth tracking, so any .md under courses/ stays local.
 courses/**/*.md
-!courses/*/assignments/README.md
 
 # ...and the whole drafts folder, images and all.
 courses/*/markdowns/
 
-# ...except inside a vendored assignment repo, where the .md files are the
-# starter repo's own docs (README, CHANGELOG, handout notes).
-!courses/*/assignments/*/*.md
-!courses/*/assignments/*/**/*.md
-
 # macOS
 .DS_Store
 
-# Assignment datasets, checkpoints and run logs. Multi-GB and regenerable — the
-# starter repos do NOT ignore these themselves.
-courses/*/assignments/*/data/
-courses/*/assignments/*/checkpoints/
-courses/*/assignments/*/wandb/
-
-# ── Python, verbatim from the CS336 starter repos' own .gitignore ──────────────
-# Vendored assignment code has no .gitignore of its own; these rules cover it.
+# Python tooling
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
