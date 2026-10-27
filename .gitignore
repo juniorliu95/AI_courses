@@ -1,6 +1,6 @@
-# Markdown drafts. Notes are written in Markdown first and converted to HTML —
-# only the HTML is worth tracking, so any .md under courses/ stays local.
+# Markdown lecture drafts stay local; rendered HTML and course READMEs are tracked.
 courses/**/*.md
+!courses/cs336/README.md
 
 # ...and the whole drafts folder, images and all.
 courses/*/markdowns/

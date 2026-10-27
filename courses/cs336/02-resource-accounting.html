@@ -833,10 +833,11 @@ num_backward_flops = (2 * B * D * D) + (2 * B * D * D)  # 268,435,456
       <li>AdaGrad = SGD + averaging by grad<sup>2</sup></li>
       <li>RMSProp = AdaGrad but with exponential averaging of grad<sup>2</sup></li>
       <li>Adam = RMSProp + momentum</li>
+      <li>AdamW = Adam + decoupled weight decay</li>
     </ul>
 
     <details class="toggle">
-      <summary>My notes <span class="name">the four updates, written out</span></summary>
+      <summary>My notes <span class="name">from SGD to AdamW: the updates and why they help</span></summary>
       <p>All elementwise, per parameter. \(g_t\) is the gradient at step \(t\), \(\eta\) the learning rate, \(\varepsilon\) a small constant to avoid dividing by zero.</p>
 
       <p><strong>SGD</strong> — the baseline everything else modifies:</p>
@@ -856,25 +857,65 @@ num_backward_flops = (2 * B * D * D) + (2 * B * D * D)  # 268,435,456
       <p>$$ \hat{m}_t = \frac{m_t}{1-\beta_1^{\,t}} \qquad \hat{v}_t = \frac{v_t}{1-\beta_2^{\,t}} \qquad \theta_t = \theta_{t-1} - \eta\, \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \varepsilon} $$</p>
       <p>The hat divides out the phantom \(m_0 = 0\) still sitting in the average with weight \(\beta^t\) — the EMA's weights only sum to \(1-\beta^t\), so dividing by that renormalizes over the gradients actually seen (at \(t=1\) it gives exactly \(\hat{m}_1 = g_1\), as if initialized from the first real gradient).</p>
 
+      <h4 id="adamw">AdamW: decay the parameters separately</h4>
+      <p>Plain Adam has no explicit parameter decay. The \(\beta_1,\beta_2\) factors forget old <em>gradients</em> in the moment estimates; they do not shrink \(\theta\). AdamW keeps Adam's moment updates and bias correction above, using only the training-loss gradient \(g_t = \nabla L_t(\theta_{t-1})\), and adds a separate shrinkage term:</p>
+      <p>$$ \theta_t = \underbrace{(1-\eta_t\lambda)\theta_{t-1}}_{\text{parameter decay}} - \underbrace{\eta_t\,\frac{\hat{m}_t}{\sqrt{\hat{v}_t}+\varepsilon}}_{\text{Adam update}} $$</p>
+      <p>Here \(\lambda \ge 0\) is the weight-decay coefficient and \(\eta_t\) allows a learning-rate schedule. Every parameter receiving the same decay settings shrinks by the same fraction \(\eta_t\lambda\) before the Adam update. The decay term enters neither \(m_t\) nor \(v_t\); setting \(\lambda=0\) recovers Adam. This is the convention used by <a href="https://docs.pytorch.org/docs/stable/generated/torch.optim.AdamW.html" target="_blank" rel="noopener">PyTorch's AdamW</a>.</p>
+
+      <div class="callout callout--tip" id="adamw-direction">
+        <p class="callout__title">Geometric view: add a pull toward the origin</p>
+        <p>Let \(u_t = \hat{m}_t/(\sqrt{\hat{v}_t}+\varepsilon)\) be Adam's adaptive direction. Then the actual parameter movement is:</p>
+        <p>$$ \Delta\theta_t = -\eta_t\bigl(u_t+\lambda\theta_{t-1}\bigr) = \underbrace{-\eta_t u_t}_{\text{follow the loss}} + \underbrace{(-\eta_t\lambda\theta_{t-1})}_{\text{pull toward zero}} $$</p>
+        <p>Adding \(+\lambda\theta_{t-1}\) nudges the effective gradient direction toward the <em>current parameter vector</em>. Because we subtract it, the actual step gets an extra component along \(-\theta_{t-1}\), toward the origin. Think of following Adam's update while a spring pulls the parameters toward zero. The origin is zero, not the initial parameter values.</p>
+        <p>This can change both the direction and length of the update. The adjustment is slight only when the decay contribution is small relative to the Adam contribution.</p>
+      </div>
+
+      <div class="callout callout--tip" id="adamw-regularization">
+        <p class="callout__title">Regularization view: discourage overly large parameters</p>
+        <p>Weight decay is a form of <strong>regularization</strong>: it creates a soft preference for smaller parameter magnitudes. The training loss pushes parameters toward values that fit the data, while decay pulls them toward zero. Parameters can still grow when the learning signal outweighs that pull; decay provides counteracting pressure rather than a hard size limit.</p>
+        <p>AdamW applies this regularization directly through parameter shrinkage. Adding an L2 penalty to the loss also discourages large weights, but Adam processes that penalty through its moment estimates and adaptive scaling. The comparison below explains why the two approaches differ.</p>
+      </div>
+
+      <p><strong>Why isn't an L2 penalty enough?</strong> Adding \(\frac{\lambda}{2}\lVert\theta\rVert_2^2\) to the loss changes the gradient to \(\tilde{g}_t = g_t + \lambda\theta_{t-1}\). With plain SGD, that gives exactly the same proportional decay:</p>
+      <p>$$ \theta_t = \theta_{t-1} - \eta_t(g_t+\lambda\theta_{t-1}) = (1-\eta_t\lambda)\theta_{t-1} - \eta_t g_t $$</p>
+      <p>With Adam, however, \(\tilde{g}_t\) feeds into <em>both</em> moment estimates. The penalty is averaged into momentum and changes the squared-gradient estimate used to scale each coordinate. Its effect therefore depends on gradient history, so it no longer produces a uniform fractional shrinkage. AdamW makes the shrinkage explicit and keeps the moment estimates focused on the training loss.</p>
+
+      <div class="callout callout--example">
+        <p class="callout__title">One step where the difference is visible</p>
+        <p>Start with \(\theta_0=(1,10)\), zero moments, a zero training-loss gradient, \(\lambda=0.1\), and \(\eta=0.001\). Adam with an L2 penalty sees \(\tilde{g}_1=(0.1,1)\). Bias correction gives \(\hat{m}_1=\tilde{g}_1\) and \(\hat{v}_1=\tilde{g}_1^2\). For small \(\varepsilon\), the normalized update is approximately \((1,1)\): both coordinates lose approximately the same <em>absolute</em> amount, \(0.001\).</p>
+        <p>AdamW has zero moments here, so only its decay acts: multiply both coordinates by \(1-0.001\times0.1=0.9999\). The result is \((0.9999,9.999)\): both lose the same <em>fraction</em>, \(0.01\%\). The larger weight gets a proportionally larger pull toward zero.</p>
+      </div>
+
       <div class="callout callout--tip">
-        <p class="callout__title">They are all the same shape</p>
-        <p>$$ \theta_t = \theta_{t-1} - \eta \cdot \frac{\text{which direction}}{\text{how big a step}} $$</p>
-        <p>The numerator answers "which way do I go" (raw gradient, or a smoothed one); the denominator answers "how far, per coordinate" (constant, or scaled by accumulated gradient magnitude). Each optimizer just picks a different pair.</p>
+        <p class="callout__title">What improves, and why?</p>
+        <ul>
+          <li><strong>More direct control of weight shrinkage:</strong> \(\lambda\) controls an explicit proportional pull toward zero, without Adam's coordinate scaling transforming that pull.</li>
+          <li><strong>Simpler tuning and potentially better generalization:</strong> separating shrinkage from gradient adaptation removes that interaction. The <a href="https://arxiv.org/abs/1711.05101" target="_blank" rel="noopener">AdamW paper (Loshchilov &amp; Hutter)</a> reports easier joint tuning of learning rate and decay, and improved generalization in its image-classification experiments. The benefit depends on the task and settings; faster convergence or better results on every model do not follow from the update rule.</li>
+          <li><strong>The same optimizer-state memory as Adam:</strong> the extra operation is a parameter multiplication; the two moment tensors still cost 8 bytes per parameter at fp32.</li>
+        </ul>
+        <p>“Decoupled” means separate from the gradient and its adaptive scaling. In the convention above, shrinkage per step is still \(\eta_t\lambda\), so the learning-rate schedule and number of training steps still affect total decay.</p>
+      </div>
+
+      <div class="callout callout--tip">
+        <p class="callout__title">Compare the pieces of each update</p>
+        <p>$$ \theta_t = c_t\,\theta_{t-1} - \eta_t \cdot \frac{\text{direction}}{\text{scale}} $$</p>
+        <p>The numerator chooses the direction; the denominator scales the step per coordinate. The parameter multiplier \(c_t\) is 1 for the versions above without weight decay, and \(1-\eta_t\lambda\) for AdamW. The table omits \(\varepsilon\) from the adaptive denominators for readability.</p>
       </div>
 
       <div class="table-wrap">
         <table>
-          <thead><tr><th>optimizer</th><th>numerator</th><th>denominator</th><th>state tensors / param</th></tr></thead>
+          <thead><tr><th>optimizer</th><th>numerator</th><th>denominator</th><th>parameter multiplier \(c_t\)</th><th>state tensors / param</th></tr></thead>
           <tbody>
-            <tr><td>SGD</td><td>\(g_t\)</td><td>\(1\)</td><td>0</td></tr>
-            <tr><td>Momentum</td><td>\(m_t\)</td><td>\(1\)</td><td>1</td></tr>
-            <tr><td>AdaGrad</td><td>\(g_t\)</td><td>\(\sqrt{\sum g^2}\)</td><td>1</td></tr>
-            <tr><td>RMSProp</td><td>\(g_t\)</td><td>\(\sqrt{\text{EMA}(g^2)}\)</td><td>1</td></tr>
-            <tr class="is-key"><td>Adam</td><td>\(\hat{m}_t\)</td><td>\(\sqrt{\hat{v}_t}\)</td><td>2</td></tr>
+            <tr><td>SGD</td><td>\(g_t\)</td><td>\(1\)</td><td>\(1\)</td><td>0</td></tr>
+            <tr><td>Momentum</td><td>\(m_t\)</td><td>\(1\)</td><td>\(1\)</td><td>1</td></tr>
+            <tr><td>AdaGrad</td><td>\(g_t\)</td><td>\(\sqrt{\sum g^2}\)</td><td>\(1\)</td><td>1</td></tr>
+            <tr><td>RMSProp</td><td>\(g_t\)</td><td>\(\sqrt{\text{EMA}(g^2)}\)</td><td>\(1\)</td><td>1</td></tr>
+            <tr><td>Adam</td><td>\(\hat{m}_t\)</td><td>\(\sqrt{\hat{v}_t}\)</td><td>\(1\)</td><td>2</td></tr>
+            <tr class="is-key"><td>AdamW</td><td>\(\hat{m}_t\)</td><td>\(\sqrt{\hat{v}_t}\)</td><td>\(1-\eta_t\lambda\)</td><td>2</td></tr>
           </tbody>
         </table>
       </div>
-      <p>That last column is the whole memory story below: AdaGrad and RMSProp keep one extra tensor per parameter, Adam keeps two — which at fp32 is the 4 and 8 bytes/parameter counted in the next section.</p>
+      <p>That last column is the whole memory story below: AdaGrad and RMSProp keep one extra tensor per parameter, Adam and AdamW keep two — which at fp32 is the 4 and 8 bytes/parameter counted in the next section.</p>
 
       <div class="callout callout--question">
         <p class="callout__title">Why the progression happens at all</p>
@@ -938,7 +979,7 @@ total_memory = parameter_memory + activation_memory + gradient_memory + optimize
     <p>It is customary to use fp32 for stability (accumulating averages over powers over many steps). Optimizer state memory:</p>
     <ul>
       <li>AdaGrad: 4 bytes/parameter for storing second moments</li>
-      <li>Adam: 8 bytes/parameter for storing first and second moments</li>
+      <li>Adam / AdamW: 8 bytes/parameter for storing first and second moments</li>
     </ul>
 
     <h4>Compute (for one training step)</h4>
